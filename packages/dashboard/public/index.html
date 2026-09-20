@@ -1,0 +1,248 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Proofwire</title>
+<style>
+  :root {
+    --bg: #0e1116;
+    --panel: #161b22;
+    --panel-2: #1c2430;
+    --line: #262d38;
+    --text: #e6edf3;
+    --muted: #8b949e;
+    --accent: #58a6ff;
+    --ok: #3fb950;
+    --deny: #f85149;
+    --warn: #d29922;
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", "Roboto Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root:not([data-theme="dark"]) {
+      --bg: #ffffff; --panel: #f6f8fa; --panel-2: #eef1f5; --line: #d8dee4;
+      --text: #1f2328; --muted: #636c76; --accent: #0969da;
+      --ok: #1a7f37; --deny: #cf222e; --warn: #9a6700;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  }
+  header {
+    padding: 18px 16px; border-bottom: 1px solid var(--line);
+    display: flex; flex-wrap: wrap; gap: 16px; align-items: center;
+    position: sticky; top: 0; background: var(--bg); z-index: 5;
+  }
+  .brand { font-weight: 700; font-size: 16px; letter-spacing: -0.2px; }
+  .brand span { color: var(--accent); }
+  .stat { display: flex; flex-direction: column; gap: 1px; }
+  .stat b { font-size: 15px; font-variant-numeric: tabular-nums; }
+  .stat i { font-style: normal; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .5px; }
+  .verdict { margin-left: auto; padding: 7px 13px; border-radius: 999px; font-weight: 600; font-size: 13px; }
+  .verdict.ok { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+  .verdict.bad { background: color-mix(in srgb, var(--deny) 16%, transparent); color: var(--deny); }
+  main { display: grid; grid-template-columns: minmax(0, 1fr) 420px; gap: 0; }
+  @media (max-width: 950px) { main { grid-template-columns: 1fr; } aside { border-left: none !important; } }
+  section { padding: 16px; min-width: 0; }
+  aside { border-left: 1px solid var(--line); padding: 16px; min-width: 0; }
+  .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+  input, select {
+    background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    padding: 7px 10px; border-radius: 7px; font: inherit; min-width: 0;
+  }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+  .row {
+    display: grid; grid-template-columns: 52px 74px 82px minmax(0,1fr) auto;
+    gap: 10px; align-items: baseline; padding: 9px 10px; border-radius: 8px;
+    cursor: pointer; border: 1px solid transparent;
+  }
+  .row:hover { background: var(--panel); }
+  .row[aria-selected="true"] { background: var(--panel-2); border-color: var(--line); }
+  .row .seq, .row .time { color: var(--muted); font-family: var(--mono); font-size: 12px; }
+  .row .target { font-family: var(--mono); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .row .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
+  .pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: .4px; }
+  .allow { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
+  .deny { background: color-mix(in srgb, var(--deny) 18%, transparent); color: var(--deny); }
+  .escalate { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
+  .phase { font-size: 10px; color: var(--muted); font-family: var(--mono); }
+  h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .6px; color: var(--muted); margin: 18px 0 8px; }
+  h2:first-child { margin-top: 0; }
+  dl { display: grid; grid-template-columns: 96px minmax(0,1fr); gap: 5px 10px; margin: 0; }
+  dt { color: var(--muted); font-size: 12px; }
+  dd { margin: 0; font-size: 13px; overflow-wrap: anywhere; }
+  code, .hash { font-family: var(--mono); font-size: 11.5px; overflow-wrap: anywhere; }
+  pre {
+    background: var(--panel); border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px; overflow: auto; font-family: var(--mono); font-size: 11.5px; margin: 0;
+  }
+  .banner { background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--warn);
+            padding: 10px 12px; border-radius: 7px; font-size: 12.5px; color: var(--muted); margin-bottom: 14px; }
+  .banner.bad { border-left-color: var(--deny); color: var(--text); }
+  .empty { color: var(--muted); padding: 34px 10px; text-align: center; }
+  .chip { display: inline-block; background: var(--panel-2); border: 1px solid var(--line);
+          border-radius: 5px; padding: 1px 6px; font-size: 11px; font-family: var(--mono); margin: 0 4px 4px 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="brand">proof<span>wire</span></div>
+  <div class="stat"><b id="s-log">—</b><i>log</i></div>
+  <div class="stat"><b id="s-size">—</b><i>receipts</i></div>
+  <div class="stat"><b id="s-blocked">—</b><i>blocked</i></div>
+  <div class="stat"><b id="s-root" class="hash">—</b><i>merkle root</i></div>
+  <div class="verdict" id="verdict">checking…</div>
+</header>
+
+<main>
+  <section>
+    <div id="alert"></div>
+    <div class="filters">
+      <input id="q" placeholder="filter by tool, principal or reason…" style="flex:1">
+      <select id="outcome">
+        <option value="">all outcomes</option>
+        <option value="deny">blocked only</option>
+        <option value="allow">allowed only</option>
+      </select>
+      <select id="phase">
+        <option value="">all phases</option>
+        <option value="intent">intent</option>
+        <option value="outcome">outcome</option>
+        <option value="atomic">atomic</option>
+      </select>
+    </div>
+    <div id="rows"></div>
+  </section>
+
+  <aside id="detail"><div class="empty">Select a receipt to inspect its proof.</div></aside>
+</main>
+
+<script type="module">
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+const short = (h, n = 12) => (h ? esc(h.slice(0, n)) + '…' : '—');
+
+let state = { entries: [], selected: null };
+
+async function load() {
+  const data = await (await fetch('/api/log')).json();
+  state.entries = data.entries;
+
+  $('s-log').textContent = data.log;
+  $('s-size').textContent = data.size;
+  $('s-blocked').textContent = data.entries.filter((e) => e.outcome !== 'allow').length;
+  $('s-root').textContent = data.root.slice(0, 12) + '…';
+  $('s-root').title = data.root;
+
+  const v = $('verdict');
+  v.className = 'verdict ' + (data.audit.ok ? 'ok' : 'bad');
+  v.textContent = data.audit.ok ? '✓ verified' : `✗ ${data.audit.issues.length} problem(s)`;
+
+  $('alert').innerHTML = data.audit.ok
+    ? (data.checkpoints.length === 0
+        ? `<div class="banner">No checkpoints yet. A signed checkpoint is what lets an outside party detect a later rewrite — one is written when a proxy session ends.</div>`
+        : '')
+    : `<div class="banner bad"><b>This log has been altered since it was written.</b><br>` +
+      data.audit.issues.map((i) => esc(`${i.kind}${i.seq !== undefined ? ` @ ${i.seq}` : ''}: ${i.message}`)).join('<br>') +
+      `</div>`;
+
+  render();
+}
+
+function render() {
+  const q = $('q').value.toLowerCase();
+  const outcome = $('outcome').value;
+  const phase = $('phase').value;
+
+  const list = state.entries.filter((e) => {
+    if (outcome === 'deny' && e.outcome === 'allow') return false;
+    if (outcome === 'allow' && e.outcome !== 'allow') return false;
+    if (phase && e.phase !== phase) return false;
+    if (!q) return true;
+    return [e.target, e.principal, e.reason, e.agent].join(' ').toLowerCase().includes(q);
+  });
+
+  $('rows').innerHTML = list.length === 0
+    ? '<div class="empty">Nothing matches.</div>'
+    : list.map((e) => `
+      <div class="row" role="option" data-seq="${e.seq}" aria-selected="${state.selected === e.seq}">
+        <span class="seq">${e.seq}</span>
+        <span class="time">${esc(e.ts.slice(11, 19))}</span>
+        <span><span class="pill ${esc(e.outcome)}">${esc(e.outcome)}</span></span>
+        <span class="target">${esc(e.target)}
+          ${e.phase !== 'atomic' ? `<span class="phase">${esc(e.phase)}</span>` : ''}
+        </span>
+        <span class="meta">${
+          e.outcome === 'allow'
+            ? esc(e.status ?? '—') + (e.latencyMs != null ? ` · ${e.latencyMs}ms` : '')
+            : esc((e.reason ?? '').slice(0, 44))
+        }</span>
+      </div>`).join('');
+
+  for (const row of document.querySelectorAll('.row')) {
+    row.onclick = () => select(Number(row.dataset.seq));
+  }
+}
+
+async function select(seq) {
+  state.selected = seq;
+  render();
+  const { receipt, proof } = await (await fetch(`/api/entry/${seq}`)).json();
+  const d = receipt.decision;
+
+  $('detail').innerHTML = `
+    <h2>Receipt ${receipt.seq}</h2>
+    <dl>
+      <dt>tool</dt><dd><code>${esc(receipt.action.target)}</code></dd>
+      <dt>decision</dt><dd><span class="pill ${esc(d.outcome)}">${esc(d.outcome)}</span></dd>
+      <dt>reason</dt><dd>${esc(d.reason ?? '—')}</dd>
+      <dt>rules</dt><dd>${(d.rules ?? []).map((r) => `<span class="chip">${esc(r)}</span>`).join('') || '—'}</dd>
+      ${d.approval ? `<dt>approved by</dt><dd>${esc(d.approval.by)}${d.approval.note ? ` — ${esc(d.approval.note)}` : ''}</dd>` : ''}
+      <dt>when</dt><dd>${esc(receipt.ts)}</dd>
+      <dt>agent</dt><dd>${esc(receipt.actor.agent)}</dd>
+      <dt>for</dt><dd>${esc(receipt.actor.principal)}</dd>
+      <dt>session</dt><dd><code>${esc(receipt.actor.session)}</code></dd>
+      <dt>policy</dt><dd class="hash" title="${esc(d.policy)}">${short(d.policy, 16)}</dd>
+      ${receipt.result ? `<dt>result</dt><dd>${esc(receipt.result.status)}${receipt.result.latencyMs != null ? ` · ${receipt.result.latencyMs}ms` : ''}</dd>` : ''}
+    </dl>
+
+    <h2>Arguments (redacted preview)</h2>
+    ${(receipt.action.params.redacted ?? []).length
+      ? `<p style="color:var(--muted);font-size:12px;margin:0 0 6px">
+           Masked before storage: ${receipt.action.params.redacted.map((t) => `<span class="chip">${esc(t)}</span>`).join('')}
+         </p>` : ''}
+    <pre>${esc(JSON.stringify(receipt.action.params.preview, null, 2))}</pre>
+    <p style="color:var(--muted);font-size:12px">
+      The log holds a salted commitment, not the payload:
+      <code>${short(receipt.action.params.hash, 20)}</code> over ${receipt.action.params.size} bytes.
+    </p>
+
+    <h2>Chain</h2>
+    <dl>
+      <dt>this entry</dt><dd class="hash">${short(proof.leaf, 24)}</dd>
+      <dt>previous</dt><dd class="hash">${short(receipt.prev, 24)}</dd>
+      <dt>signed by</dt><dd class="hash">${esc(receipt.attest.kid)}</dd>
+      ${receipt.ref ? `<dt>follows</dt><dd class="hash">${short(receipt.ref, 24)}</dd>` : ''}
+    </dl>
+
+    <h2>Inclusion proof</h2>
+    <dl>
+      <dt>tree size</dt><dd>${proof.treeSize}</dd>
+      <dt>root</dt><dd class="hash">${short(proof.root, 24)}</dd>
+      <dt>path</dt><dd>${proof.proof.length} sibling hashes</dd>
+    </dl>
+    <pre>${proof.proof.map((h) => esc(h)).join('\n') || '(single-entry tree)'}</pre>
+    <p style="color:var(--muted);font-size:12px">
+      Anyone can recompute the root from this entry and these hashes.
+      Verify it offline with <code>pw prove ${receipt.seq}</code>.
+    </p>`;
+}
+
+for (const el of ['q', 'outcome', 'phase']) $(el).oninput = render;
+load();
+setInterval(load, 4000);
+</script>
+</body>
+</html>

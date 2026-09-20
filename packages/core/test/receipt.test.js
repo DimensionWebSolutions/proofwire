@@ -1,0 +1,203 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { generateIdentity } from '../src/keys.js';
+import {
+  buildReceipt,
+  signReceipt,
+  verifyReceipt,
+  verifyChain,
+  entryHash,
+  seal,
+  openSeal,
+  GENESIS_PREV,
+} from '../src/receipt.js';
+
+const { identity } = generateIdentity();
+/** @type {Record<string,string>} */
+const keyring = { [identity.kid]: identity.publicKey };
+
+/**
+ * @param {number} seq
+ * @param {string} prev
+ * @param {object} [over]
+ */
+function make(seq, prev, over = {}) {
+  return signReceipt(
+    identity,
+    buildReceipt({
+      log: 'lg_test',
+      seq,
+      prev,
+      actor: {
+        agent: 'claude-opus-5',
+        runtime: 'proofwire-test/0.1.0',
+        session: 'sess_1',
+        principal: 'ops@acme.test',
+      },
+      action: { kind: 'tool_call', target: 'stripe.refund', params: { amount: 100 } },
+      decision: { outcome: 'allow', policy: 'p0', rules: [] },
+      result: { status: 'ok', payload: { id: 're_1' } },
+      ts: new Date(1_700_000_000_000 + seq * 1000).toISOString(),
+      ...over,
+    }).body,
+  );
+}
+
+/** @param {number} n */
+function chainOf(n) {
+  const out = [];
+  let prev = GENESIS_PREV;
+  for (let i = 0; i < n; i++) {
+    const r = make(i, prev);
+    out.push(r);
+    prev = entryHash(r);
+  }
+  return out;
+}
+
+test('a signed receipt verifies against its own key', () => {
+  assert.deepEqual(verifyReceipt(make(0, GENESIS_PREV), keyring), []);
+});
+
+test('altering any signed field breaks the signature', () => {
+  /** @type {[string, (r: any) => void][]} */
+  const mutations = [
+    ['the spend amount', (r) => (r.action.params.preview.amount = 1_000_000)],
+    ['the decision', (r) => (r.decision.outcome = 'deny')],
+    ['the principal', (r) => (r.actor.principal = 'someone.else@acme.test')],
+    ['the timestamp', (r) => (r.ts = '2020-01-01T00:00:00.000Z')],
+    ['the target tool', (r) => (r.action.target = 'stripe.payout')],
+    ['the sequence number', (r) => (r.seq = 99)],
+    ['the params commitment', (r) => (r.action.params.hash = 'ab'.repeat(32))],
+  ];
+  for (const [label, mutate] of mutations) {
+    const r = make(0, GENESIS_PREV);
+    mutate(r);
+    const issues = verifyReceipt(r, keyring);
+    assert.ok(
+      issues.some((i) => i.kind === 'signature'),
+      `tampering with ${label} went undetected`,
+    );
+  }
+});
+
+test('a receipt signed by an untrusted key is rejected', () => {
+  const stranger = generateIdentity().identity;
+  const r = signReceipt(stranger, buildReceipt({
+    log: 'lg_test',
+    seq: 0,
+    prev: GENESIS_PREV,
+    actor: { agent: 'x', runtime: 'x', session: 'x', principal: 'x' },
+    action: { kind: 'tool_call', target: 't', params: {} },
+    decision: { outcome: 'allow', policy: 'p0', rules: [] },
+  }).body);
+  const issues = verifyReceipt(r, keyring);
+  assert.equal(issues[0].kind, 'key');
+});
+
+test('a receipt re-signed by a stranger still fails: the kid is not in the keyring', () => {
+  const stranger = generateIdentity().identity;
+  const r = make(0, GENESIS_PREV);
+  r.action.target = 'stripe.payout';
+  const forged = signReceipt(stranger, /** @type {any} */ ({ ...r, attest: undefined }));
+  assert.ok(verifyReceipt(forged, keyring).some((i) => i.kind === 'key'));
+});
+
+test('an intact chain verifies end to end', () => {
+  const res = verifyChain(chainOf(10), keyring);
+  assert.ok(res.ok, JSON.stringify(res.issues));
+  assert.equal(res.count, 10);
+});
+
+test('deleting an entry from the middle is detected', () => {
+  const chain = chainOf(10);
+  chain.splice(4, 1);
+  const res = verifyChain(chain, keyring);
+  assert.equal(res.ok, false);
+  assert.ok(res.issues.some((i) => i.kind === 'chain'));
+  assert.ok(res.issues.some((i) => i.kind === 'sequence'));
+});
+
+test('reordering two entries is detected', () => {
+  const chain = chainOf(6);
+  [chain[2], chain[3]] = [chain[3], chain[2]];
+  const res = verifyChain(chain, keyring);
+  assert.equal(res.ok, false);
+  assert.ok(res.issues.some((i) => i.kind === 'chain'));
+});
+
+test('appending a well-formed entry to a truncated chain is still detected', () => {
+  // The operator deletes the inconvenient entry 5, then re-signs 6..9 with
+  // correct sequence numbers and chain links. The prefix still verifies, but
+  // the head no longer matches what was checkpointed — which is what the log's
+  // consistency check catches. Here we confirm the rewrite at least produces
+  // a different head than the honest chain.
+  const honest = chainOf(10);
+  const honestHead = verifyChain(honest, keyring).head;
+
+  const rewritten = [];
+  let prev = GENESIS_PREV;
+  for (let i = 0; i < 9; i++) {
+    const r = make(i, prev);
+    rewritten.push(r);
+    prev = entryHash(r);
+  }
+  const res = verifyChain(rewritten, keyring);
+  assert.ok(res.ok, 'a fully re-signed chain is internally consistent, as expected');
+  assert.notEqual(res.head, honestHead, 'the rewrite must not reproduce the honest head');
+});
+
+test('a backdated timestamp is flagged', () => {
+  const a = make(0, GENESIS_PREV);
+  const b = make(1, entryHash(a), { ts: '2001-01-01T00:00:00.000Z' });
+  const res = verifyChain([a, b], keyring);
+  assert.ok(res.issues.some((i) => i.kind === 'time'));
+});
+
+test('a sealed value can be revealed later and checked', () => {
+  const secret = { card: '4111111111111111', note: 'refund for order 91' };
+  const { sealed, salt } = seal(secret);
+  assert.ok(openSeal(sealed, salt, secret));
+  assert.equal(openSeal(sealed, salt, { ...secret, note: 'something else' }), false);
+});
+
+test('seal commits to the value but never contains it', () => {
+  const { sealed } = seal({ ssn: '123-45-6789', amount: 50 });
+  const asText = JSON.stringify(sealed);
+  assert.ok(!asText.includes('123-45-6789'), 'the raw SSN leaked into the commitment');
+  assert.ok(asText.includes('[redacted:us_ssn'), 'the preview should name what was masked');
+  assert.deepEqual(sealed.redacted, ['us_ssn']);
+});
+
+test('salting defeats brute-forcing a low-entropy payload', () => {
+  // Same value, two seals: an attacker cannot recognise a repeat, let alone
+  // guess the plaintext from a dictionary of likely amounts.
+  const a = seal({ amount: 50 });
+  const b = seal({ amount: 50 });
+  assert.notEqual(a.sealed.hash, b.sealed.hash);
+});
+
+test('a receipt carries no salt, so it is publishable as written', () => {
+  const r = make(0, GENESIS_PREV);
+  const text = JSON.stringify(r);
+  assert.ok(!text.includes('"salt"'), 'a salt reached the receipt');
+  assert.ok(verifyChain([r], keyring).ok);
+});
+
+test('without the salt, a commitment cannot be opened even by us', () => {
+  // Crypto-shredding: destroy the salt and the payload is unrecoverable, while
+  // the signature and chain link still verify.
+  const { body, salts } = buildReceipt({
+    log: 'lg_test',
+    seq: 0,
+    prev: GENESIS_PREV,
+    actor: { agent: 'a', runtime: 'r', session: 's', principal: 'p' },
+    action: { kind: 'tool_call', target: 't', params: { amount: 100 } },
+    decision: { outcome: 'allow', policy: 'p0', rules: [] },
+  });
+  const signed = signReceipt(identity, body);
+
+  assert.ok(openSeal(signed.action.params, salts.params, { amount: 100 }));
+  assert.equal(openSeal(signed.action.params, undefined, { amount: 100 }), false);
+  assert.deepEqual(verifyReceipt(signed, keyring), [], 'shredding must not break verification');
+});

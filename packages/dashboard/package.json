@@ -1,0 +1,12 @@
+{
+  "name": "@proofwire/dashboard",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Local read-only dashboard for a Proofwire log.",
+  "license": "Apache-2.0",
+  "main": "./src/server.js",
+  "exports": { ".": "./src/server.js" },
+  "files": ["src", "public"],
+  "dependencies": { "@proofwire/core": "0.1.0" },
+  "engines": { "node": ">=20.11" }
+}

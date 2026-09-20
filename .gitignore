@@ -1,0 +1,10 @@
+node_modules/
+*.log
+.DS_Store
+
+# A Proofwire log's signing key and commitment salts never get committed.
+# Entries and checkpoints are safe — and worth committing.
+**/.proofwire/key.pem
+**/.proofwire/salts.jsonl
+.proofwire-witness/
+*.bundle.json

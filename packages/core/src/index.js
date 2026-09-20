@@ -1,0 +1,60 @@
+/**
+ * Proofwire core — tamper-evident receipts for AI agent actions.
+ *
+ * @see https://proofwire.dev/docs
+ */
+
+export { canonicalize, canonicalBytes } from './canonical.js';
+export {
+  sha256,
+  hashObject,
+  hex,
+  unhex,
+  equalBytes,
+  LEAF_PREFIX,
+  NODE_PREFIX,
+  RECEIPT_PREFIX,
+  CHECKPOINT_PREFIX,
+} from './hash.js';
+export {
+  generateIdentity,
+  identityFromPem,
+  identityFromPublicKey,
+  publicKeyObject,
+  keyIdFor,
+  sign,
+  verify,
+} from './keys.js';
+export {
+  MerkleTree,
+  leafHash,
+  nodeHash,
+  merkleRoot,
+  inclusionProof,
+  verifyInclusion,
+  consistencyProof,
+  verifyConsistency,
+} from './merkle.js';
+export {
+  RECEIPT_VERSION,
+  GENESIS_PREV,
+  seal,
+  openSeal,
+  buildReceipt,
+  receiptDigest,
+  entryHash,
+  signReceipt,
+  verifyReceipt,
+  verifyChain,
+} from './receipt.js';
+export {
+  CHECKPOINT_VERSION,
+  buildCheckpoint,
+  checkpointDigest,
+  signCheckpoint,
+  cosign,
+  verifyCheckpoint,
+} from './checkpoint.js';
+export { ProofLog, verifyBundle } from './log.js';
+export { Policy, History, parseWindow, globMatch } from './policy.js';
+export { redact, hasSecrets, DEFAULT_DETECTORS } from './redact.js';

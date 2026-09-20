@@ -1,0 +1,302 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { ProofLog, verifyBundle } from '../src/log.js';
+import { canonicalize } from '../src/canonical.js';
+import { identityFromPem, generateIdentity } from '../src/keys.js';
+import { buildReceipt, signReceipt, entryHash, GENESIS_PREV } from '../src/receipt.js';
+import { cosign, verifyCheckpoint } from '../src/checkpoint.js';
+
+/** @returns {string} */
+function tmpdir() {
+  return fs.mkdtempSync(path.join(os.tmpdir(), 'proofwire-test-'));
+}
+
+/**
+ * @param {ProofLog} log
+ * @param {number} n
+ * @param {object} [over]
+ */
+function fill(log, n, over = {}) {
+  for (let i = 0; i < n; i++) {
+    log.append({
+      actor: {
+        agent: 'claude-opus-5',
+        runtime: 'proofwire-test/0.1.0',
+        session: 'sess_a',
+        principal: 'ops@acme.test',
+      },
+      action: {
+        kind: 'tool_call',
+        target: 'stripe.refund',
+        params: { order: `ord_${i}`, amount: 10 + i },
+        metrics: { amount_usd: 10 + i },
+      },
+      decision: { outcome: 'allow', policy: 'p_test', rules: [] },
+      result: { status: 'ok', payload: { id: `re_${i}` }, latencyMs: 12 },
+      ...over,
+    });
+  }
+}
+
+test('a fresh log audits clean and reopens identically', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 25);
+  const root = log.root;
+
+  const audit = log.audit();
+  assert.ok(audit.ok, JSON.stringify(audit.issues, null, 2));
+  assert.equal(audit.size, 25);
+
+  const reopened = ProofLog.open(dir, { readOnly: true });
+  assert.equal(reopened.root, root, 'root must survive a round-trip through disk');
+  assert.equal(reopened.size, 25);
+  assert.ok(reopened.audit().ok);
+});
+
+test('a read-only log refuses to append', () => {
+  const dir = tmpdir();
+  ProofLog.create(dir);
+  const ro = ProofLog.open(dir, { readOnly: true });
+  assert.throws(() => fill(ro, 1), /read-only/);
+});
+
+test('editing an entry on disk is caught', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 8);
+
+  const file = path.join(dir, 'entries.jsonl');
+  const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
+  const doctored = JSON.parse(lines[3]);
+  doctored.action.metrics.amount_usd = 999999;
+  lines[3] = canonicalize(doctored);
+  fs.writeFileSync(file, lines.join('\n') + '\n');
+
+  const audit = ProofLog.open(dir, { readOnly: true }).audit();
+  assert.equal(audit.ok, false);
+  assert.ok(audit.issues.some((i) => i.kind === 'signature' && i.seq === 3));
+});
+
+test('deleting an entry on disk is caught', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 8);
+
+  const file = path.join(dir, 'entries.jsonl');
+  const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
+  lines.splice(5, 1);
+  fs.writeFileSync(file, lines.join('\n') + '\n');
+
+  const audit = ProofLog.open(dir, { readOnly: true }).audit();
+  assert.equal(audit.ok, false);
+  assert.ok(audit.issues.some((i) => i.kind === 'chain' || i.kind === 'sequence'));
+});
+
+test('an insider with the signing key still cannot rewrite checkpointed history', () => {
+  // The hard case. Someone with full write access and the private key deletes
+  // an embarrassing entry and re-signs the entire chain so that sequence
+  // numbers and chain links are all internally perfect. Local chain checks
+  // pass. The published checkpoint is what convicts them.
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 12);
+  const published = log.checkpoint();
+
+  const identity = identityFromPem(fs.readFileSync(path.join(dir, 'key.pem'), 'utf8'));
+  const originals = fs
+    .readFileSync(path.join(dir, 'entries.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l));
+
+  const kept = originals.filter((r) => r.seq !== 7);
+  let prev = GENESIS_PREV;
+  const rebuilt = kept.map((r, i) => {
+    const { attest: _drop, ...body } = r;
+    const resigned = signReceipt(identity, { ...body, seq: i, prev });
+    prev = entryHash(resigned);
+    return canonicalize(resigned);
+  });
+  fs.writeFileSync(path.join(dir, 'entries.jsonl'), rebuilt.join('\n') + '\n');
+
+  const reopened = ProofLog.open(dir, { readOnly: true });
+  const audit = reopened.audit();
+
+  assert.equal(audit.ok, false, 'a rewritten history passed audit');
+  assert.ok(
+    audit.issues.some((i) => /history was rewritten|entries have been removed/.test(i.message)),
+    `expected a rewrite finding, got: ${JSON.stringify(audit.issues)}`,
+  );
+  // And the log can no longer produce the root it published: at the size the
+  // checkpoint covers, its own history now hashes to something else.
+  assert.equal(reopened.size, 11);
+  assert.notEqual(
+    reopened.tree.rootAt(Math.min(published.body.size, reopened.size)).toString('hex'),
+    published.body.root,
+  );
+});
+
+test('a checkpoint signed over a size the log no longer reaches is caught', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 10);
+  log.checkpoint();
+
+  const file = path.join(dir, 'entries.jsonl');
+  const lines = fs.readFileSync(file, 'utf8').trim().split('\n');
+  fs.writeFileSync(file, lines.slice(0, 6).join('\n') + '\n');
+
+  const audit = ProofLog.open(dir, { readOnly: true }).audit();
+  assert.equal(audit.ok, false);
+  assert.ok(audit.issues.some((i) => /entries have been removed/.test(i.message)));
+});
+
+test('witness co-signatures accumulate on a checkpoint', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 4);
+  const cp = log.checkpoint();
+
+  const w1 = generateIdentity().identity;
+  const w2 = generateIdentity().identity;
+  log.trustKey(w1.kid, w1.publicKey);
+  log.trustKey(w2.kid, w2.publicKey);
+
+  const cosigned = cosign(cosign(cp, w1), w2);
+  const res = verifyCheckpoint(cosigned, log.keyring, { minWitnesses: 2 });
+  assert.ok(res.ok, JSON.stringify(res.issues));
+  assert.equal(res.witnesses, 2);
+
+  // The same checkpoint, judged by a policy that demands three witnesses.
+  assert.equal(verifyCheckpoint(cosigned, log.keyring, { minWitnesses: 3 }).ok, false);
+});
+
+test('a forged witness signature does not count', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 2);
+  const cp = log.checkpoint();
+
+  const impostor = generateIdentity().identity;
+  log.trustKey(impostor.kid, impostor.publicKey);
+  const cosigned = cosign(cp, impostor);
+  cosigned.sigs[cosigned.sigs.length - 1].sig = 'A'.repeat(86);
+
+  const res = verifyCheckpoint(cosigned, log.keyring, { minWitnesses: 1 });
+  assert.equal(res.ok, false);
+  assert.ok(res.issues.some((m) => /invalid witness signature/.test(m)));
+});
+
+test('an exported bundle verifies with nothing but itself', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 15);
+  log.checkpoint();
+
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+  const res = verifyBundle(bundle);
+  assert.ok(res.ok, JSON.stringify(res.issues, null, 2));
+  assert.equal(res.checked, 15);
+});
+
+test('a bundle with an entry swapped out fails verification', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 15);
+
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+  bundle.entries[6].receipt.action.metrics.amount_usd = 1;
+  const res = verifyBundle(bundle);
+  assert.equal(res.ok, false);
+  assert.ok(res.issues.some((m) => /not provably part of the logged tree/.test(m)));
+});
+
+test('a bundle shown with a root the auditor did not expect is flagged', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 5);
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+
+  const res = verifyBundle(bundle, { expectRoot: 'ab'.repeat(32) });
+  assert.equal(res.ok, false);
+  assert.ok(res.issues.some((m) => /different history/.test(m)));
+});
+
+test('a filtered bundle still proves each entry belongs to the full log', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 20);
+
+  const bundle = JSON.parse(
+    JSON.stringify(log.bundle({ filter: (r) => r.seq % 2 === 0 })),
+  );
+  assert.equal(bundle.partial, true);
+  assert.equal(bundle.entries.length, 10);
+
+  const res = verifyBundle(bundle);
+  assert.ok(res.ok, JSON.stringify(res.issues, null, 2));
+  // The tree size still refers to the whole log, so the recipient can see
+  // that they were handed a subset rather than being told it is everything.
+  assert.equal(bundle.treeSize, 20);
+});
+
+test('reveal confirms a payload; shredding makes it permanently unopenable', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  log.append({
+    actor: { agent: 'a', runtime: 'r', session: 's', principal: 'p' },
+    action: {
+      kind: 'tool_call',
+      target: 'crm.lookup',
+      params: { email: 'jordan@example.test', ssn: '123-45-6789' },
+    },
+    decision: { outcome: 'allow', policy: 'p_test', rules: [] },
+  });
+
+  assert.ok(log.reveal(0, 'params', { email: 'jordan@example.test', ssn: '123-45-6789' }));
+  assert.equal(log.reveal(0, 'params', { email: 'someone@example.test' }), false);
+
+  assert.equal(log.shred((r) => r.seq === 0), 1);
+
+  const after = ProofLog.open(dir, { readOnly: true });
+  assert.equal(
+    after.reveal(0, 'params', { email: 'jordan@example.test', ssn: '123-45-6789' }),
+    false,
+    'the payload should no longer be confirmable',
+  );
+  assert.ok(after.audit().ok, 'erasure must leave the audit trail intact');
+});
+
+test('inclusion proofs handed out for individual entries verify standalone', async () => {
+  const { verifyInclusion } = await import('../src/merkle.js');
+  const { unhex } = await import('../src/hash.js');
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 33);
+
+  for (const seq of [0, 1, 16, 31, 32]) {
+    const p = log.proofFor(seq);
+    assert.ok(
+      verifyInclusion({
+        leafHash: unhex(p.leaf),
+        index: p.seq,
+        treeSize: p.treeSize,
+        proof: p.proof.map(unhex),
+        root: unhex(p.root),
+      }),
+      `standalone proof failed for entry ${seq}`,
+    );
+  }
+});
+
+test('opening a log whose key does not match its config is refused', () => {
+  const dir = tmpdir();
+  ProofLog.create(dir);
+  const { privateKeyPem } = generateIdentity();
+  fs.writeFileSync(path.join(dir, 'key.pem'), privateKeyPem);
+  assert.throws(() => ProofLog.open(dir), /does not match config/);
+});

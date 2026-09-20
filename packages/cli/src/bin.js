@@ -1,0 +1,668 @@
+#!/usr/bin/env node
+import fs from 'node:fs';
+import path from 'node:path';
+import { ProofLog, verifyBundle, Policy, verifyInclusion, unhex, generateIdentity } from '@proofwire/core';
+import { McpProxy } from '@proofwire/proxy';
+import { approverFrom } from '@proofwire/proxy/approve';
+import { c, out, err, ok, bad, warn, info, heading, kv, table, outcomeBadge, parseArgs } from './ui.js';
+
+const VERSION = '0.1.0';
+const CONFIG = 'proofwire.config.json';
+const POLICY = 'proofwire.policy.json';
+
+/**
+ * @param {any} args
+ * @returns {{ dir: string, config: any }}
+ */
+function loadConfig(args) {
+  const configPath = path.resolve(args.config ?? CONFIG);
+  const config = fs.existsSync(configPath)
+    ? JSON.parse(fs.readFileSync(configPath, 'utf8'))
+    : {};
+  const dir = path.resolve(args.log ?? config.log ?? '.proofwire');
+  return { dir, config };
+}
+
+/**
+ * @param {any} config
+ * @param {any} args
+ * @returns {Policy}
+ */
+function loadPolicy(config, args) {
+  const file = path.resolve(args.policy ?? config.policy ?? POLICY);
+  if (!fs.existsSync(file)) {
+    // No policy is a real choice — record everything, block nothing — but it
+    // should be a visible one rather than a silent default.
+    warn(`no policy file at ${path.relative(process.cwd(), file)}; recording without enforcement`);
+    return new Policy({ version: 1, name: 'permissive', rules: [] });
+  }
+  return Policy.parse(fs.readFileSync(file, 'utf8'));
+}
+
+const STARTER_POLICY = `{
+  "version": 1,
+  "name": "starter",
+
+  // Rules run top to bottom. The first rule with a "then" decides.
+  // A rule with no "then" just tags the call and evaluation continues.
+  "rules": [
+    {
+      "id": "deny.destructive-sql",
+      "when": { "params.sql": { "matches": "(?i)\\\\b(drop|truncate|delete\\\\s+from)\\\\b" } },
+      "then": "deny",
+      "reason": "destructive SQL from an agent is not permitted"
+    },
+    {
+      "id": "escalate.outbound-mail",
+      "when": { "target": "*.send*" },
+      "then": "escalate",
+      "reason": "anything that leaves the building gets a human"
+    }
+  ],
+
+  // Budgets aggregate the clear-text metrics your config extracts.
+  "budgets": [
+    {
+      "id": "spend.daily",
+      "match": { "target": "*" },
+      "field": "metrics.amount_usd",
+      "limit": 1000,
+      "window": "24h",
+      "then": "escalate"
+    }
+  ],
+
+  // Rate limits count allowed calls only; denials cost nothing.
+  "rateLimits": [
+    { "id": "burst.any-tool", "match": { "target": "*" }, "limit": 500, "window": "1h", "then": "escalate" }
+  ],
+
+  // Refuse to hand credentials or card numbers to a tool, whatever the rules say.
+  "egress": { "denySecrets": true }
+}
+`;
+
+const STARTER_CONFIG = {
+  log: '.proofwire',
+  policy: POLICY,
+  actor: {
+    agent: 'claude-opus-5',
+    principal: process.env.USER || process.env.USERNAME || 'unknown',
+  },
+  approval: { mode: 'deny' },
+  metrics: {
+    'stripe.*': { amount_usd: { from: 'params.amount', scale: 0.01 } },
+  },
+};
+
+// ──────────────────────────────────────────────────────────── commands ──
+
+/** @param {any} args */
+function cmdInit(args) {
+  const dir = path.resolve(args.log ?? '.proofwire');
+  if (fs.existsSync(path.join(dir, 'config.json'))) {
+    bad(`a log already exists at ${path.relative(process.cwd(), dir) || '.'}`);
+    return 1;
+  }
+
+  const log = ProofLog.create(dir);
+  if (!fs.existsSync(POLICY)) fs.writeFileSync(POLICY, STARTER_POLICY);
+  if (!fs.existsSync(CONFIG)) fs.writeFileSync(CONFIG, JSON.stringify(STARTER_CONFIG, null, 2) + '\n');
+
+  const gitignore = '.gitignore';
+  const rules = ['.proofwire/key.pem', '.proofwire/salts.jsonl'];
+  const existing = fs.existsSync(gitignore) ? fs.readFileSync(gitignore, 'utf8') : '';
+  const missing = rules.filter((r) => !existing.includes(r));
+  if (missing.length) {
+    fs.appendFileSync(
+      gitignore,
+      (existing && !existing.endsWith('\n') ? '\n' : '') +
+        '\n# Proofwire: the signing key and the commitment salts never get committed\n' +
+        missing.join('\n') +
+        '\n',
+    );
+  }
+
+  heading('Proofwire initialised');
+  kv([
+    ['log', log.logId],
+    ['key', log.identity.kid],
+    ['dir', path.relative(process.cwd(), dir) || '.'],
+    ['policy', POLICY],
+    ['config', CONFIG],
+  ]);
+  out('');
+  info('Commit entries.jsonl and checkpoints.jsonl. Never commit key.pem or salts.jsonl.');
+  out('');
+  out(`  Next: wrap an MCP server so every call it makes gets a receipt.`);
+  out('');
+  out(c.cyan('    pw proxy --namespace crm -- npx -y @acme/mcp-crm'));
+  out('');
+  return 0;
+}
+
+/** @param {any} args */
+async function cmdProxy(args) {
+  if (args.rest.length === 0) {
+    bad('nothing to wrap. Put the MCP server command after `--`:');
+    out(c.cyan('  pw proxy --namespace crm -- npx -y @acme/mcp-crm'));
+    return 2;
+  }
+  const { dir, config } = loadConfig(args);
+  const log = ProofLog.open(dir);
+  const policy = loadPolicy(config, args);
+
+  const proxy = new McpProxy({
+    log,
+    policy,
+    actor: {
+      agent: args.agent ?? config.actor?.agent ?? 'unknown-agent',
+      session: args.session ?? 'sess_' + Date.now().toString(36),
+      principal: args.principal ?? config.actor?.principal ?? 'unknown',
+    },
+    approver: approverFrom(args.approve ? { mode: args.approve } : config.approval),
+    command: args.rest[0],
+    args: args.rest.slice(1),
+    namespace: args.namespace ?? config.namespace,
+    metrics: config.metrics,
+  });
+
+  // Diagnostics go to stderr: stdout is the MCP channel and must carry
+  // nothing but protocol.
+  err(
+    c.grey(
+      `proofwire ${VERSION} · log ${log.logId} · policy ${policy.name} ` +
+        `(${policy.hash.slice(0, 8)}) · wrapping: ${args.rest.join(' ')}`,
+    ),
+  );
+  proxy.on('denied', ({ target, decision }) => {
+    err(`${c.red('blocked')} ${target} — ${decision.reason}`);
+  });
+
+  const finish = () => {
+    try {
+      proxy.finalize();
+    } catch (e) {
+      err(`proofwire: could not finalize the log: ${e.message}`);
+    }
+  };
+  process.on('SIGINT', () => {
+    finish();
+    process.exit(130);
+  });
+  process.on('SIGTERM', () => {
+    finish();
+    process.exit(143);
+  });
+
+  const code = await proxy.start();
+  finish();
+  const s = proxy.stats;
+  err(
+    c.grey(
+      `proofwire · ${log.size} receipts · ${s.forwarded} allowed · ${s.denied} blocked · ` +
+        `${s.approved}/${s.escalated} approvals · root ${log.root.slice(0, 16)}…`,
+    ),
+  );
+  return code;
+}
+
+/** @param {any} args */
+function cmdVerify(args) {
+  const { dir } = loadConfig(args);
+  const log = ProofLog.open(dir, { readOnly: true });
+  const res = log.audit();
+
+  heading(`Audit · ${log.logId}`);
+  kv([
+    ['entries', String(res.size)],
+    ['root', res.root],
+    ['head', log.head],
+    ['checkpoints', String(log.checkpoints().length)],
+    ['keys', Object.keys(log.keyring).join(', ')],
+  ]);
+  out('');
+
+  if (res.ok) {
+    ok(c.bold('Every receipt verifies. The chain is unbroken and extends every checkpoint.'));
+    out('');
+    return 0;
+  }
+
+  bad(c.bold(`${res.issues.length} problem(s) found:`));
+  out('');
+  for (const i of res.issues) {
+    const where = i.seq !== undefined ? c.grey(`entry ${i.seq}`) : c.grey('log');
+    out(`  ${c.red(i.kind.padEnd(10))} ${where}  ${i.message}`);
+  }
+  out('');
+  warn('This log has been altered since it was written. Treat it as evidence of tampering,');
+  warn('not as a corrupted file to repair.');
+  out('');
+  return 1;
+}
+
+/** @param {any} args */
+function cmdLog(args) {
+  const { dir } = loadConfig(args);
+  const log = ProofLog.open(dir, { readOnly: true });
+  const limit = Number(args.tail ?? args.n ?? 20);
+  let entries = log.entries;
+
+  if (args.target) entries = entries.filter((r) => r.action.target.includes(args.target));
+  if (args.principal) entries = entries.filter((r) => r.actor.principal === args.principal);
+  if (args.denied) entries = entries.filter((r) => r.decision.outcome !== 'allow');
+  if (args.session) entries = entries.filter((r) => r.actor.session === args.session);
+
+  const shown = entries.slice(-limit);
+
+  if (args.json) {
+    out(JSON.stringify(shown, null, 2));
+    return 0;
+  }
+
+  heading(`${log.logId} · showing ${shown.length} of ${entries.length}`);
+  if (shown.length === 0) {
+    out('  ' + c.grey('nothing recorded yet'));
+    out('');
+    return 0;
+  }
+
+  table(
+    ['#', 'when', 'outcome', 'tool', 'principal', 'detail'],
+    shown.map((r) => [
+      c.grey(String(r.seq)),
+      r.ts.slice(11, 19),
+      outcomeBadge(r.decision.outcome),
+      r.action.target,
+      c.grey(r.actor.principal),
+      r.decision.outcome === 'allow'
+        ? c.grey(
+            r.result
+              ? `${r.result.status}${r.result.latencyMs !== undefined ? ` ${r.result.latencyMs}ms` : ''}`
+              // An intent receipt is the record that the call was authorised
+              // and sent, written before the reply could exist.
+              : 'committed, awaiting result',
+          )
+        : c.yellow(r.decision.reason.slice(0, 60)),
+    ]),
+  );
+  out('');
+  return 0;
+}
+
+/** @param {any} args */
+function cmdExport(args) {
+  const { dir } = loadConfig(args);
+  const log = ProofLog.open(dir, { readOnly: true });
+  const file = args._[1] ?? `proofwire-${log.logId}-${Date.now()}.bundle.json`;
+
+  /** @type {((r: any) => boolean)|undefined} */
+  let filter;
+  if (args.since) {
+    const since = new Date(args.since).toISOString();
+    filter = (r) => r.ts >= since;
+  }
+  if (args.session) {
+    const prev = filter;
+    filter = (r) => r.actor.session === args.session && (!prev || prev(r));
+  }
+
+  const bundle = log.bundle(filter ? { filter } : {});
+  fs.writeFileSync(file, JSON.stringify(bundle, null, 2) + '\n');
+
+  heading('Evidence bundle written');
+  kv([
+    ['file', file],
+    ['entries', `${bundle.entries.length}${bundle.partial ? ` (of ${bundle.treeSize})` : ''}`],
+    ['root', bundle.root],
+    ['size', `${(fs.statSync(file).size / 1024).toFixed(1)} KB`],
+  ]);
+  out('');
+  info('This bundle contains no payloads and no salts — it is safe to send.');
+  info(`The recipient verifies it with:  ${c.cyan(`pw check ${path.basename(file)}`)}`);
+  out('');
+  return 0;
+}
+
+/** @param {any} args */
+function cmdCheck(args) {
+  const file = args._[1];
+  if (!file) {
+    bad('which bundle? `pw check <file.bundle.json>`');
+    return 2;
+  }
+  const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const res = verifyBundle(bundle, {
+    expectRoot: args.root,
+    minWitnesses: Number(args.witnesses ?? 0),
+  });
+
+  heading(`Bundle · ${bundle.log}`);
+  kv([
+    ['exported', bundle.exported ?? '—'],
+    ['entries', `${res.checked}${bundle.partial ? ` (a subset of ${bundle.treeSize})` : ''}`],
+    ['root', bundle.root],
+    ['checkpoints', String((bundle.checkpoints ?? []).length)],
+  ]);
+  out('');
+
+  if (res.ok) {
+    ok(c.bold('Verified. Every receipt is signed and provably part of this log.'));
+    if (bundle.partial) {
+      out('');
+      warn('This is a filtered export. Each entry shown is proven genuine, but the');
+      warn('bundle cannot prove that nothing relevant was left out. Ask for a full');
+      warn(`export, or compare the root against a witness: ${c.cyan('pw check --root <root>')}`);
+    }
+    out('');
+    return 0;
+  }
+
+  bad(c.bold(`${res.issues.length} problem(s):`));
+  out('');
+  for (const i of res.issues) out(`  ${c.red('✗')} ${i}`);
+  out('');
+  return 1;
+}
+
+/** @param {any} args */
+function cmdProve(args) {
+  const { dir } = loadConfig(args);
+  const log = ProofLog.open(dir, { readOnly: true });
+  const seq = Number(args._[1]);
+  if (!Number.isInteger(seq)) {
+    bad('which entry? `pw prove <seq>`');
+    return 2;
+  }
+  const proof = log.proofFor(seq);
+  if (args.json) {
+    out(JSON.stringify({ ...proof, receipt: log.entries[seq] }, null, 2));
+    return 0;
+  }
+
+  const r = log.entries[seq];
+  heading(`Inclusion proof · entry ${seq}`);
+  kv([
+    ['tool', r.action.target],
+    ['outcome', outcomeBadge(r.decision.outcome)],
+    ['when', r.ts],
+    ['principal', r.actor.principal],
+    ['leaf', proof.leaf],
+    ['root', proof.root],
+    ['tree size', String(proof.treeSize)],
+    ['path', `${proof.proof.length} hashes`],
+  ]);
+  out('');
+  const good = verifyInclusion({
+    leafHash: unhex(proof.leaf),
+    index: proof.seq,
+    treeSize: proof.treeSize,
+    proof: proof.proof.map(unhex),
+    root: unhex(proof.root),
+  });
+  if (good) ok('Proof checks out against the current root.');
+  else bad('Proof does not verify — the log is inconsistent.');
+  out('');
+  return good ? 0 : 1;
+}
+
+/** @param {any} args */
+function cmdShred(args) {
+  const { dir } = loadConfig(args);
+  const log = ProofLog.open(dir);
+
+  /** @type {((r: any) => boolean)|null} */
+  let predicate = null;
+  /** @type {string} */
+  let described = '';
+
+  if (args.before) {
+    const cutoff = new Date(args.before).toISOString();
+    predicate = (r) => r.ts < cutoff;
+    described = `recorded before ${cutoff}`;
+  } else if (args.principal) {
+    predicate = (r) => r.actor.principal === args.principal;
+    described = `acting for ${args.principal}`;
+  } else if (args.session) {
+    predicate = (r) => r.actor.session === args.session;
+    described = `from session ${args.session}`;
+  } else if (args.seq !== undefined) {
+    const seq = Number(args.seq);
+    predicate = (r) => r.seq === seq;
+    described = `entry ${seq}`;
+  }
+
+  if (!predicate) {
+    bad('specify what to shred: --before <date>, --principal <id>, --session <id>, or --seq <n>');
+    return 2;
+  }
+
+  const matching = log.entries.filter(predicate);
+  if (matching.length === 0) {
+    info(`nothing matches ${described}`);
+    return 0;
+  }
+
+  if (!args.yes) {
+    heading('Crypto-shred (dry run)');
+    out(`  This would destroy the commitment salts for ${c.bold(String(matching.length))} entries ${described}.`);
+    out('');
+    out('  After shredding, those payloads cannot be confirmed by anyone — including you,');
+    out('  including under subpoena. Signatures, chain links and inclusion proofs all');
+    out('  keep verifying, so the audit trail survives intact.');
+    out('');
+    out(`  Re-run with ${c.cyan('--yes')} to proceed. This cannot be undone.`);
+    out('');
+    return 0;
+  }
+
+  const n = log.shred(predicate);
+  ok(`shredded ${n} payload commitment(s) ${described}`);
+  const audit = log.audit();
+  if (audit.ok) ok('the audit trail still verifies end to end');
+  else bad('the log no longer verifies — investigate before relying on it');
+  out('');
+  return audit.ok ? 0 : 1;
+}
+
+/** @param {any} args */
+function cmdKeys(args) {
+  const { dir } = loadConfig(args);
+  const log = ProofLog.open(dir, { readOnly: true });
+  heading(`Keys · ${log.logId}`);
+  for (const [kid, pub] of Object.entries(log.keyring)) {
+    const role = kid === log.config.kid ? c.green('this log') : c.grey('trusted');
+    out(`  ${c.bold(kid)}  ${role}`);
+    out(`  ${c.grey(pub)}`);
+    out('');
+  }
+  info('Publish these public keys wherever your auditors will look for them.');
+  info('A verifier that gets its keys from the same place it gets the log proves nothing.');
+  out('');
+  return 0;
+}
+
+/** @param {any} args */
+function cmdWitness(args) {
+  const dir = path.resolve(args.out ?? '.proofwire-witness');
+  if (args._[1] === 'keygen') {
+    const { identity, privateKeyPem } = generateIdentity();
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'key.pem'), privateKeyPem, { mode: 0o600 });
+    fs.writeFileSync(
+      path.join(dir, 'public.json'),
+      JSON.stringify({ kid: identity.kid, publicKey: identity.publicKey }, null, 2) + '\n',
+    );
+    heading('Witness identity created');
+    kv([['kid', identity.kid], ['dir', dir]]);
+    out('');
+    info('Give the kid and public key to every log that should be witnessed:');
+    out(`  ${c.cyan(`pw trust ${identity.kid} ${identity.publicKey}`)}`);
+    out('');
+    return 0;
+  }
+  bad('usage: pw witness keygen [--out <dir>]');
+  return 2;
+}
+
+/** @param {any} args */
+function cmdTrust(args) {
+  const { dir } = loadConfig(args);
+  const [, kid, pub] = args._;
+  if (!kid || !pub) {
+    bad('usage: pw trust <kid> <publicKey>');
+    return 2;
+  }
+  const log = ProofLog.open(dir);
+  log.trustKey(kid, pub);
+  ok(`now trusting ${kid}`);
+  return 0;
+}
+
+/** @param {any} args */
+function cmdStats(args) {
+  const { dir } = loadConfig(args);
+  const log = ProofLog.open(dir, { readOnly: true });
+  const e = log.entries;
+
+  const byOutcome = { allow: 0, deny: 0, escalate: 0 };
+  /** @type {Record<string, number>} */
+  const byTool = {};
+  /** @type {Record<string, number>} */
+  const spend = {};
+  let errors = 0;
+  let latency = 0;
+  let timed = 0;
+
+  for (const r of e) {
+    byOutcome[r.decision.outcome] = (byOutcome[r.decision.outcome] ?? 0) + 1;
+    byTool[r.action.target] = (byTool[r.action.target] ?? 0) + 1;
+    if (r.result?.status === 'error') errors++;
+    if (r.result?.latencyMs !== undefined) {
+      latency += r.result.latencyMs;
+      timed++;
+    }
+    for (const [k, v] of Object.entries(r.action.metrics ?? {})) {
+      if (r.decision.outcome === 'allow') spend[k] = (spend[k] ?? 0) + Number(v);
+    }
+  }
+
+  heading(`${log.logId}`);
+  kv([
+    ['receipts', String(e.length)],
+    ['allowed', c.green(String(byOutcome.allow))],
+    ['blocked', byOutcome.deny ? c.red(String(byOutcome.deny)) : '0'],
+    ['tool errors', String(errors)],
+    ['avg latency', timed ? `${Math.round(latency / timed)} ms` : '—'],
+    ['root', log.root.slice(0, 32) + '…'],
+  ]);
+
+  if (Object.keys(spend).length) {
+    heading('Committed spend');
+    kv(Object.entries(spend).map(([k, v]) => [k, v.toFixed(2)]));
+  }
+
+  const top = Object.entries(byTool).sort((a, b) => b[1] - a[1]).slice(0, 10);
+  if (top.length) {
+    heading('Busiest tools');
+    kv(top.map(([t, n]) => [t, String(n)]));
+  }
+  out('');
+  return 0;
+}
+
+/** @param {any} args */
+async function cmdDash(args) {
+  const { dir } = loadConfig(args);
+  const { serve } = await import('@proofwire/dashboard');
+  const port = Number(args.port ?? 7788);
+  const url = await serve({ dir, port });
+  heading('Proofwire dashboard');
+  kv([['url', c.cyan(url)], ['log', path.relative(process.cwd(), dir) || '.']]);
+  out('');
+  info('Ctrl-C to stop.');
+  return new Promise(() => {});
+}
+
+function cmdHelp() {
+  out('');
+  out(`  ${c.bold('proofwire')} ${c.grey(VERSION)} — tamper-evident receipts for AI agent actions`);
+  out('');
+  out(`  ${c.bold('Setup')}`);
+  out(`    ${c.cyan('pw init')}                        create a log, a starter policy, and a config`);
+  out('');
+  out(`  ${c.bold('Run')}`);
+  out(`    ${c.cyan('pw proxy -- <cmd...>')}           wrap an MCP server; enforce policy, write receipts`);
+  out(`      ${c.grey('--namespace <ns>')}            prefix tool names in receipts`);
+  out(`      ${c.grey('--principal <id>')}            who the agent is acting for`);
+  out(`      ${c.grey('--approve tty|webhook|deny')}  how escalations get resolved`);
+  out('');
+  out(`  ${c.bold('Inspect')}`);
+  out(`    ${c.cyan('pw log')}                         recent receipts  ${c.grey('[--tail N --denied --target X --json]')}`);
+  out(`    ${c.cyan('pw stats')}                       totals, spend, busiest tools`);
+  out(`    ${c.cyan('pw dash')}                        browsable dashboard  ${c.grey('[--port 7788]')}`);
+  out('');
+  out(`  ${c.bold('Prove')}`);
+  out(`    ${c.cyan('pw verify')}                      audit the local log end to end`);
+  out(`    ${c.cyan('pw prove <seq>')}                 inclusion proof for one receipt`);
+  out(`    ${c.cyan('pw export [file]')}               evidence bundle for a third party  ${c.grey('[--since --session]')}`);
+  out(`    ${c.cyan('pw check <file>')}                verify a bundle with nothing but itself`);
+  out('');
+  out(`  ${c.bold('Govern')}`);
+  out(`    ${c.cyan('pw keys')}                        public keys to publish for verifiers`);
+  out(`    ${c.cyan('pw witness keygen')}              create an independent witness identity`);
+  out(`    ${c.cyan('pw trust <kid> <pubkey>')}        trust a witness or another signer`);
+  out(`    ${c.cyan('pw shred --before <date>')}       destroy payload commitments, keep the audit trail`);
+  out('');
+  return 0;
+}
+
+// ─────────────────────────────────────────────────────────────── main ──
+
+const COMMANDS = {
+  init: cmdInit,
+  proxy: cmdProxy,
+  verify: cmdVerify,
+  audit: cmdVerify,
+  log: cmdLog,
+  ls: cmdLog,
+  export: cmdExport,
+  check: cmdCheck,
+  prove: cmdProve,
+  shred: cmdShred,
+  keys: cmdKeys,
+  witness: cmdWitness,
+  trust: cmdTrust,
+  stats: cmdStats,
+  dash: cmdDash,
+  help: cmdHelp,
+};
+
+async function main() {
+  const args = parseArgs(process.argv.slice(2));
+  const name = args._[0];
+
+  if (args.version || args.v) {
+    out(VERSION);
+    return 0;
+  }
+  if (!name || args.help || args.h) return cmdHelp();
+
+  const command = COMMANDS[name];
+  if (!command) {
+    bad(`unknown command "${name}"`);
+    out(`  try ${c.cyan('pw help')}`);
+    return 2;
+  }
+
+  try {
+    return await command(args);
+  } catch (e) {
+    bad(/** @type {Error} */ (e).message);
+    if (process.env.PROOFWIRE_DEBUG) err(String(/** @type {Error} */ (e).stack));
+    return 1;
+  }
+}
+
+process.exitCode = await main();
