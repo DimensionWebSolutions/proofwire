@@ -12,7 +12,7 @@ import {
   verifyConsistency,
 } from '../src/merkle.js';
 import { canonicalize } from '../src/canonical.js';
-import { identityFromPublicKey, publicKeyObject, sign, verify, keyIdFor } from '../src/keys.js';
+import { identityFromPublicKey, publicKeyObject, sign, verify, keyIdFor, generateIdentity } from '../src/keys.js';
 
 /**
  * Known-answer tests against **external** ground truth.
@@ -361,4 +361,42 @@ test('a random proof is never accepted', () => {
       'a randomly generated proof was accepted',
     );
   }
+});
+
+// ── strictness ───────────────────────────────────────────────────────────
+
+test('keys and signatures must be canonical base64url', () => {
+  // Node's own decoder accepts every one of these — padding, whitespace, the
+  // standard alphabet — and would have verified them. A verifier that quietly
+  // accepts malformed encodings can be argued into agreeing with something it
+  // should have rejected, and two implementations can disagree about it.
+  const v = ED25519_VECTORS[0];
+  const key = Buffer.from(v.public, 'hex').toString('base64url');
+  const sig = Buffer.from(v.signature, 'hex').toString('base64url');
+  const msg = Buffer.from(v.message, 'hex');
+
+  assert.ok(verify(key, msg, sig), 'the canonical encoding must still verify');
+
+  for (const bad of [`${sig}=`, `${sig}\n`, ` ${sig}`, `${sig}!`, sig.slice(0, -1), '']) {
+    assert.equal(verify(key, msg, bad), false, `accepted signature ${JSON.stringify(bad.slice(-8))}`);
+  }
+  for (const bad of [`${key}=`, `${key}\n`, ` ${key}`, key.slice(0, -1), '']) {
+    assert.equal(verify(bad, msg, sig), false, `accepted key ${JSON.stringify(bad.slice(-8))}`);
+    assert.throws(() => identityFromPublicKey(bad), undefined, `built an identity from ${JSON.stringify(bad.slice(-8))}`);
+  }
+
+  // The same signature spelled in the standard alphabet. Find one that has a
+  // character where the two alphabets differ.
+  let found = 0;
+  for (let i = 0; i < 200 && found < 5; i++) {
+    const id = generateIdentity().identity;
+    const m = randomBytes(16);
+    const s = sign(id, m);
+    if (!/[-_]/.test(s)) continue;
+    const standard = s.replace(/-/g, '+').replace(/_/g, '/');
+    assert.ok(verify(id.publicKey, m, s));
+    assert.equal(verify(id.publicKey, m, standard), false, 'accepted the standard base64 alphabet');
+    found++;
+  }
+  assert.ok(found > 0, 'the search never produced a signature that exercises the alphabet check');
 });

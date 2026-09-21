@@ -24,6 +24,27 @@ import { sha256 } from './hash.js';
  */
 
 /**
+ * Decode base64url strictly.
+ *
+ * `Buffer.from(x, 'base64url')` is forgiving to the point of being a hazard for a
+ * verifier: it accepts `=` padding, the standard `+` and `/` alphabet, and it
+ * silently skips whitespace and any other character it does not recognise. A
+ * signature or key that decodes fine but is not what the wire format says is one
+ * more thing that two implementations can disagree about — and a verifier that
+ * quietly accepts malformed encodings is one that can be argued into agreeing
+ * with something it should have rejected.
+ *
+ * @param {string} s
+ * @returns {Buffer}
+ */
+function decodeBase64url(s) {
+  if (typeof s !== 'string' || !/^[A-Za-z0-9_-]*$/.test(s) || s.length % 4 === 1) {
+    throw new TypeError('not base64url');
+  }
+  return Buffer.from(s, 'base64url');
+}
+
+/**
  * Raw public key bytes from a Node KeyObject, via JWK (`x` is base64url).
  *
  * @param {import('node:crypto').KeyObject} pub
@@ -97,7 +118,7 @@ export function identityFromPem(pem) {
  * @returns {Identity}
  */
 export function identityFromPublicKey(publicKeyB64u) {
-  const raw = Buffer.from(publicKeyB64u, 'base64url');
+  const raw = decodeBase64url(publicKeyB64u);
   if (raw.length !== 32) {
     throw new TypeError(`Ed25519 public key must be 32 bytes, got ${raw.length}`);
   }
@@ -112,7 +133,7 @@ export function identityFromPublicKey(publicKeyB64u) {
  * @returns {import('node:crypto').KeyObject}
  */
 export function publicKeyObject(publicKeyB64u) {
-  const raw = Buffer.from(publicKeyB64u, 'base64url');
+  const raw = decodeBase64url(publicKeyB64u);
   if (raw.length !== 32) {
     throw new TypeError(`Ed25519 public key must be 32 bytes, got ${raw.length}`);
   }
@@ -144,7 +165,7 @@ export function sign(identity, message) {
 export function verify(publicKeyB64u, message, signatureB64u) {
   let sig;
   try {
-    sig = Buffer.from(signatureB64u, 'base64url');
+    sig = decodeBase64url(signatureB64u);
   } catch {
     return false;
   }

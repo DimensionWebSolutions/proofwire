@@ -432,7 +432,7 @@ test('random single-value mutations get the same verdict from both', async () =>
       parent[key] = pick([
         value.slice(0, cut) + pick(['x', '0', 'f', ' ', '"']) + value.slice(cut + 1),
         value.slice(0, Math.max(0, value.length - 1)),
-        value + pick(['0', 'a', '=']),
+        value + pick(['0', 'a', '=', ' ', '\n', '+', '/']),
         '',
       ]);
     } else if (typeof value === 'number') {
