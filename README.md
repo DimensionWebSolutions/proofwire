@@ -13,7 +13,7 @@ Run it standalone on one machine, or as a **hub** your whole organisation
 writes to — with shared policy, an approvals inbox, tenant isolation, and
 independent witnesses that make a hosted log worth believing.
 
-**[Check a real log in your browser →](https://dimensionwebsolutions.github.io/proofwire/)** Then try to cheat it: edit a
+**[Check a real log in your browser →](https://proofwire.github.io/proofwire/)** Then try to cheat it: edit a
 receipt, cut the tail off, invent your own witnesses. Nothing you paste leaves
 the page.
 
@@ -47,7 +47,7 @@ append-only log that an outside party can verify without trusting you.
 ## See it in one command
 
 ```bash
-git clone https://github.com/DimensionWebSolutions/proofwire && cd proofwire
+git clone https://github.com/proofwire/proofwire && cd proofwire
 npm install
 npm run demo
 ```

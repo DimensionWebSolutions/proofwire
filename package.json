@@ -25,10 +25,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/DimensionWebSolutions/proofwire.git"
+    "url": "git+https://github.com/proofwire/proofwire.git"
   },
-  "homepage": "https://github.com/DimensionWebSolutions/proofwire#readme",
+  "homepage": "https://github.com/proofwire/proofwire#readme",
   "bugs": {
-    "url": "https://github.com/DimensionWebSolutions/proofwire/issues"
+    "url": "https://github.com/proofwire/proofwire/issues"
   }
 }

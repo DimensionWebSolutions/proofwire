@@ -1,7 +1,7 @@
 /**
  * Proofwire core — tamper-evident receipts for AI agent actions.
  *
- * @see https://github.com/DimensionWebSolutions/proofwire#readme
+ * @see https://github.com/proofwire/proofwire#readme
  */
 
 export { canonicalize, canonicalBytes } from './canonical.js';

@@ -4,7 +4,7 @@
 
 Use GitHub's private vulnerability reporting:
 
-**https://github.com/DimensionWebSolutions/proofwire/security/advisories/new**
+**https://github.com/proofwire/proofwire/security/advisories/new**
 
 It reaches the maintainers privately and keeps the fix and the disclosure in
 one place. There is no security mailbox yet; this file will say so when

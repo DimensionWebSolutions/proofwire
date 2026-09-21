@@ -6,9 +6,10 @@ Two paths. The second is the one to use once it is set up.
 
 ## What is already done
 
-- The repository is live and public, with GitHub's private vulnerability
-  reporting on, so the link in [`SECURITY.md`](../SECURITY.md) works.
-- The website is live at <https://dimensionwebsolutions.github.io/proofwire/>. It is static files in `site/`, deployed by
+- The repository is live and public in the `proofwire` organisation, with
+  GitHub's private vulnerability reporting on, so the link in
+  [`SECURITY.md`](../SECURITY.md) works.
+- The website is live at <https://proofwire.github.io/proofwire/>. It is static files in `site/`, deployed by
   `.github/workflows/pages.yml`; the site's own tests gate the deploy and
   `site/test/` is not published.
 - CI runs the full suite on Linux, macOS and Windows, on Node 22 LTS and 24,
@@ -126,26 +127,30 @@ Then the things that are not automatable and are worth doing deliberately:
 
 ## The website's address
 
-It is at <https://dimensionwebsolutions.github.io/proofwire/>. Every path on the site is relative, so it works under any
-prefix or at a root; moving it changes where it is served from, not the site.
+The repository is `github.com/proofwire/proofwire` and the site is at
+<https://proofwire.github.io/proofwire/>. Every path on the site is relative, so
+it works under any prefix or at a root; moving it changes where it is served
+from, not the site.
 
-To put it under `proofwire.github.io`:
+The bare hostname, <https://proofwire.github.io/>, is served by a separate
+one-file repository, `proofwire/proofwire.github.io`, that does nothing but
+redirect to `/proofwire/`. GitHub serves a hostname's root only from a repository
+of exactly that name, and keeping the site's source in one place is worth more
+than one fewer path segment. If you would rather the site *be* at the root,
+rename this repository to `proofwire.github.io` (that name then appears in every
+source link) and delete the redirect repository.
 
-1. Create a free GitHub organisation named `proofwire`. That is an account
-   action, so it has to be you; the handle was unclaimed when this was written.
-2. Transfer this repository into it (Settings → General → Danger zone). GitHub
-   redirects the repository's own URLs; do not count on the old `github.io`
-   address doing the same. Pages is served per repository, so the site moves to
-   `proofwire.github.io/proofwire/`.
-3. Update everything that names the old owner: `repository` in each
-   `package.json`, the `REPO` constant in `site/test/site.test.js`, the links in
-   `site/index.html`, `SECURITY.md`, and the README badges. The site tests fail
-   on the links they can see. Publish again after changing `repository`: until
-   then the site's npm check will, correctly, decline to advertise a package that
-   points at the old owner.
-4. Optionally add a one-file repository named `proofwire.github.io` whose
-   `index.html` redirects to `/proofwire/`, so the bare hostname lands somewhere.
-   GitHub serves a hostname's root only from a repository of exactly that name.
+The repository was transferred from a personal account, which left three things
+worth knowing:
+
+- GitHub redirects the old repository and `git` URLs. It does not redirect the
+  old `github.io` address, which now returns 404.
+- `repository` in each `package.json` already names this repository, so the
+  first publish carries the right value. The site's npm check compares it with
+  `GITHUB_REPOSITORY`; a package published under the old owner's URL would,
+  correctly, not be advertised.
+- Pages, private vulnerability reporting, the homepage and the topics all
+  survived the transfer; that was checked, not assumed.
 
 A custom domain later is Settings → Pages → Custom domain; nothing in the site
 needs to change.

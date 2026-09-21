@@ -3,7 +3,7 @@
 Signed, hash-chained, Merkle-anchored receipts for AI agent actions.
 **Zero dependencies** — Node's standard library only.
 
-[![CI](https://github.com/DimensionWebSolutions/proofwire/actions/workflows/ci.yml/badge.svg)](https://github.com/DimensionWebSolutions/proofwire/actions/workflows/ci.yml)
+[![CI](https://github.com/proofwire/proofwire/actions/workflows/ci.yml/badge.svg)](https://github.com/proofwire/proofwire/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](#)
 
@@ -57,7 +57,7 @@ Ed25519 test vectors, pinning signature bytes rather than round-trips.
 | [`@proofwire/server`](https://npmjs.com/package/@proofwire/server) | The multi-tenant hub |
 | [`@proofwire/dashboard`](https://npmjs.com/package/@proofwire/dashboard) | Local read-only dashboard |
 
-Full documentation: **https://github.com/DimensionWebSolutions/proofwire**
+Full documentation: **https://github.com/proofwire/proofwire**
 
 Apache-2.0. The format, the verifier and the CLI are open and stay open:
 evidence you cannot verify without a vendor's permission is not evidence.

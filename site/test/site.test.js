@@ -15,7 +15,7 @@ const SITE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const ROOT = path.resolve(SITE, '..');
 const read = (f) => readFileSync(path.join(SITE, f), 'utf8');
 
-const REPO = 'https://github.com/DimensionWebSolutions/proofwire';
+const REPO = 'https://github.com/proofwire/proofwire';
 const INDEX = read('index.html');
 const NOT_FOUND = read('404.html');
 const APP = read('app.js');

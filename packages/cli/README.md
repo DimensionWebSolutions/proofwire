@@ -2,7 +2,7 @@
 
 **Tamper-evident receipts for AI agent actions.**
 
-[![CI](https://github.com/DimensionWebSolutions/proofwire/actions/workflows/ci.yml/badge.svg)](https://github.com/DimensionWebSolutions/proofwire/actions/workflows/ci.yml)
+[![CI](https://github.com/proofwire/proofwire/actions/workflows/ci.yml/badge.svg)](https://github.com/proofwire/proofwire/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 [![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](#)
 
@@ -78,7 +78,7 @@ pw shred --before <date>   destroy payload commitments, keep the audit trail
   pinned to published RFC 6962 and RFC 8032 vectors rather than only to
   itself, but that is not the same thing.
 
-Full threat model: https://github.com/DimensionWebSolutions/proofwire/blob/main/docs/THREAT-MODEL.md
+Full threat model: https://github.com/proofwire/proofwire/blob/main/docs/THREAT-MODEL.md
 
 ## Part of Proofwire
 
@@ -90,7 +90,7 @@ Full threat model: https://github.com/DimensionWebSolutions/proofwire/blob/main/
 | [`@proofwire/server`](https://npmjs.com/package/@proofwire/server) | The multi-tenant hub |
 | [`@proofwire/dashboard`](https://npmjs.com/package/@proofwire/dashboard) | Local read-only dashboard |
 
-Full documentation: **https://github.com/DimensionWebSolutions/proofwire**
+Full documentation: **https://github.com/proofwire/proofwire**
 
 Apache-2.0. The format, the verifier and the CLI are open and stay open:
 evidence you cannot verify without a vendor's permission is not evidence.
