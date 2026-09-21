@@ -32,12 +32,13 @@ Out of scope unless you want to: the console, the CLI, the policy engine
 
 ```bash
 npm install          # zero external dependencies; installs 5 workspace links
-npm test             # 200 tests
+npm test             # 207 tests
 node --no-warnings=ExperimentalWarning packages/server/test/load.js
 npm run demo         # attacks a real log four ways
 ```
 
-No build step. Node ≥ 22.5 (for `node:sqlite`); the core needs only ≥ 20.11.
+No build step. Node ≥ 22.13 (where `node:sqlite` stopped needing a flag); the core needs
+only ≥ 20.11 and has no dependencies at all.
 
 ---
 

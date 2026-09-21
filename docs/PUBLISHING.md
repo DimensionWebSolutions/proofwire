@@ -7,7 +7,9 @@ Two paths. The second is the one to use once it is set up.
 ## What is already done
 
 - The repository is live and public.
-- CI runs the full suite on Linux, macOS and Windows, on Node 22.5 and 24.
+- CI runs the full suite on Linux, macOS and Windows, on Node 22 LTS and 24,
+  plus a compatibility job that exercises the core on Node 20.11 — the oldest
+  version it claims to support.
 - Every package carries its own README, LICENSE and repository metadata, so
   each npm page links back to its own subtree rather than the repo root.
 - Scoped packages are marked `publishConfig.access=public`, which they need

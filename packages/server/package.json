@@ -30,7 +30,7 @@
     "@proofwire/core": "0.2.0"
   },
   "engines": {
-    "node": ">=22.5"
+    "node": ">=22.13"
   },
   "publishConfig": {
     "access": "public"
