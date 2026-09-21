@@ -13,10 +13,20 @@ Run it standalone on one machine, or as a **hub** your whole organisation
 writes to — with shared policy, an approvals inbox, tenant isolation, and
 independent witnesses that make a hosted log worth believing.
 
+**[Check a real log in your browser →](https://dimensionwebsolutions.github.io/proofwire/)** Then try to cheat it: edit a
+receipt, cut the tail off, invent your own witnesses. Nothing you paste leaves
+the page.
+
 ```bash
 npm install -g proofwire
 pw init
 ```
+
+> **Not on npm yet.** Until the first release, `npm install -g proofwire` will
+> 404. From a clone, run `npm install`, then use `npm run pw -- <command>`
+> wherever this README says `pw <command>` (for example `npm run pw -- init`).
+> This note goes away with the first publish; see
+> [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
 
 Then wrap any MCP server:
 

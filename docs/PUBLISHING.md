@@ -6,7 +6,11 @@ Two paths. The second is the one to use once it is set up.
 
 ## What is already done
 
-- The repository is live and public.
+- The repository is live and public, with GitHub's private vulnerability
+  reporting on, so the link in [`SECURITY.md`](../SECURITY.md) works.
+- The website is live at <https://dimensionwebsolutions.github.io/proofwire/>. It is static files in `site/`, deployed by
+  `.github/workflows/pages.yml`; the site's own tests gate the deploy and
+  `site/test/` is not published.
 - CI runs the full suite on Linux, macOS and Windows, on Node 22 LTS and 24,
   plus a compatibility job that exercises the core on Node 20.11 — the oldest
   version it claims to support.
@@ -102,6 +106,14 @@ npm view proofwire
 
 Then the things that are not automatable and are worth doing deliberately:
 
+- [ ] Check the site noticed. The Pages workflow reruns when Release finishes
+      and writes the version into `site/release.json`, which reveals the install
+      line on the page. It does so only if `npm view proofwire repository.url`
+      points at this repository: the CLI's name is unscoped, so without that
+      check anyone who registered it first would be advertised here. Then delete
+      the *Not on npm yet* note from the root `README.md` (not from
+      `packages/cli/README.md`, which ships in the tarball and is correct once
+      published).
 - [ ] Enable **2FA on the npm account**. A compromised publish account on a
       package that claims to make things tamper-evident is the worst available
       outcome.
@@ -111,6 +123,32 @@ Then the things that are not automatable and are worth doing deliberately:
 - [ ] Commission the cryptographic review in
       [`AUDIT-BRIEF.md`](AUDIT-BRIEF.md) — the one remaining blocker for a
       hosted service, and the thing to do before charging anyone.
+
+## The website's address
+
+It is at <https://dimensionwebsolutions.github.io/proofwire/>. Every path on the site is relative, so it works under any
+prefix or at a root; moving it changes where it is served from, not the site.
+
+To put it under `proofwire.github.io`:
+
+1. Create a free GitHub organisation named `proofwire`. That is an account
+   action, so it has to be you; the handle was unclaimed when this was written.
+2. Transfer this repository into it (Settings → General → Danger zone). GitHub
+   redirects the repository's own URLs; do not count on the old `github.io`
+   address doing the same. Pages is served per repository, so the site moves to
+   `proofwire.github.io/proofwire/`.
+3. Update everything that names the old owner: `repository` in each
+   `package.json`, the `REPO` constant in `site/test/site.test.js`, the links in
+   `site/index.html`, `SECURITY.md`, and the README badges. The site tests fail
+   on the links they can see. Publish again after changing `repository`: until
+   then the site's npm check will, correctly, decline to advertise a package that
+   points at the old owner.
+4. Optionally add a one-file repository named `proofwire.github.io` whose
+   `index.html` redirects to `/proofwire/`, so the bare hostname lands somewhere.
+   GitHub serves a hostname's root only from a repository of exactly that name.
+
+A custom domain later is Settings → Pages → Custom domain; nothing in the site
+needs to change.
 
 ## Versioning
 
