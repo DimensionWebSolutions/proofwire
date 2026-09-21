@@ -15,9 +15,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { ProofLog, Policy, verifyBundle, canonicalize, identityFromPem, signReceipt, entryHash, GENESIS_PREV, generateIdentity, cosign, verifyCheckpoint } from '@proofwire/core';
-import { McpProxy } from '@proofwire/proxy';
-import { LineFramer } from '@proofwire/proxy/jsonrpc';
+import { ProofLog, Policy, verifyBundle, canonicalize, identityFromPem, signReceipt, entryHash, GENESIS_PREV, generateIdentity, cosign, verifyCheckpoint } from '@proof_wire/core';
+import { McpProxy } from '@proof_wire/proxy';
+import { LineFramer } from '@proof_wire/proxy/jsonrpc';
 
 const SERVER = fileURLToPath(new URL('./fake-mcp-server.js', import.meta.url));
 const B = (s) => `[1m${s}[0m`;

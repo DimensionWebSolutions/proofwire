@@ -1,5 +1,5 @@
 {
-  "name": "@proofwire/dashboard",
+  "name": "@proof_wire/dashboard",
   "version": "0.2.0",
   "type": "module",
   "description": "Local read-only dashboard for a Proofwire log.",
@@ -23,7 +23,7 @@
     "public"
   ],
   "dependencies": {
-    "@proofwire/core": "0.2.0"
+    "@proof_wire/core": "0.2.0"
   },
   "engines": {
     "node": ">=20.11"

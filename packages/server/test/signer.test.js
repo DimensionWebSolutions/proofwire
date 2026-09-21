@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { generateIdentity, verify, verifyCheckpoint } from '@proofwire/core';
+import { generateIdentity, verify, verifyCheckpoint } from '@proof_wire/core';
 import {
   localSigner,
   commandSigner,
@@ -234,8 +234,8 @@ test('a hub signs checkpoints through an external signer, end to end', async () 
   const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
 
   // Push a few receipts from a local agent.
-  const { ProofLog } = await import('@proofwire/core');
-  const { RemoteSink } = await import('@proofwire/proxy/remote');
+  const { ProofLog } = await import('@proof_wire/core');
+  const { RemoteSink } = await import('@proof_wire/proxy/remote');
   const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-kms-log-'));
   const localLog = ProofLog.create(logDir);
   for (let i = 0; i < 4; i++) {
@@ -261,7 +261,7 @@ test('a hub signs checkpoints through an external signer, end to end', async () 
     method: 'POST', headers, body: JSON.stringify({ checkpoint: cp }),
   })).json();
   assert.equal(signed.witness.kid, witnessKey.identity.kid);
-  const { checkpointDigest } = await import('@proofwire/core');
+  const { checkpointDigest } = await import('@proof_wire/core');
   assert.ok(
     verify(witnessKey.identity.publicKey, checkpointDigest(cp.body), signed.signature.sig),
     'the witness countersignature must verify over the checkpoint body',
@@ -271,7 +271,7 @@ test('a hub signs checkpoints through an external signer, end to end', async () 
   const bundle = await (await fetch(`${base}/v1/logs/kms-log/bundle`, { headers })).json();
   assert.ok(bundle.keyring[hubKey.identity.kid], 'the external hub key must travel with the bundle');
 
-  const { verifyBundle } = await import('@proofwire/core');
+  const { verifyBundle } = await import('@proof_wire/core');
   const res = verifyBundle(bundle);
   assert.ok(res.ok, JSON.stringify(res.issues));
 
@@ -300,8 +300,8 @@ test('a disabled signer stops checkpoints but never stops ingest', async () => {
   }).token;
   const headers = { authorization: `Bearer ${token}`, 'content-type': 'application/json' };
 
-  const { ProofLog } = await import('@proofwire/core');
-  const { RemoteSink } = await import('@proofwire/proxy/remote');
+  const { ProofLog } = await import('@proof_wire/core');
+  const { RemoteSink } = await import('@proof_wire/proxy/remote');
   const logDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw-nokey-'));
   const localLog = ProofLog.create(logDir);
   localLog.append({

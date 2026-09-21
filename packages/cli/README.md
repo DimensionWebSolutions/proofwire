@@ -85,10 +85,10 @@ Full threat model: https://github.com/proofwire/proofwire/blob/main/docs/THREAT-
 | Package | What it is |
 | --- | --- |
 | [`proofwire`](https://npmjs.com/package/proofwire) | The `pw` CLI — start here |
-| [`@proofwire/core`](https://npmjs.com/package/@proofwire/core) | Receipts, Merkle log, policy engine. Zero dependencies. |
-| [`@proofwire/proxy`](https://npmjs.com/package/@proofwire/proxy) | The MCP proxy and the hub client |
-| [`@proofwire/server`](https://npmjs.com/package/@proofwire/server) | The multi-tenant hub |
-| [`@proofwire/dashboard`](https://npmjs.com/package/@proofwire/dashboard) | Local read-only dashboard |
+| [`@proof_wire/core`](https://npmjs.com/package/@proof_wire/core) | Receipts, Merkle log, policy engine. Zero dependencies. |
+| [`@proof_wire/proxy`](https://npmjs.com/package/@proof_wire/proxy) | The MCP proxy and the hub client |
+| [`@proof_wire/server`](https://npmjs.com/package/@proof_wire/server) | The multi-tenant hub |
+| [`@proof_wire/dashboard`](https://npmjs.com/package/@proof_wire/dashboard) | Local read-only dashboard |
 
 Full documentation: **https://github.com/proofwire/proofwire**
 

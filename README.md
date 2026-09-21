@@ -301,7 +301,7 @@ Govern
 Not on MCP? The core is a small, dependency-free ES module.
 
 ```js
-import { ProofLog, Policy } from '@proofwire/core';
+import { ProofLog, Policy } from '@proof_wire/core';
 
 const log = ProofLog.open('.proofwire');
 const policy = Policy.parse(await readFile('proofwire.policy.json', 'utf8'));

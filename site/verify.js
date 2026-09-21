@@ -2,7 +2,7 @@
  * Proofwire evidence-bundle verifier, for browsers.
  *
  * This is a second, independent implementation of what `pw check` does. It
- * shares no code with @proofwire/core: canonical JSON, the RFC 6962 tree, the
+ * shares no code with @proof_wire/core: canonical JSON, the RFC 6962 tree, the
  * receipt and checkpoint digests and the Ed25519 checks are all written again
  * here against WebCrypto, so it runs in a browser tab with nothing installed
  * and nothing uploaded.
@@ -339,7 +339,7 @@ async function verifyChain(receipts, keyring) {
 /**
  * Check a checkpoint's signatures. Witnesses count only when pinned: the bundle's
  * keyring is supplied by the party under suspicion, so it cannot vouch for them.
- * See the same function in @proofwire/core for the reasoning.
+ * See the same function in @proof_wire/core for the reasoning.
  *
  * @param {any} checkpoint
  * @param {Record<string, string>} keyring

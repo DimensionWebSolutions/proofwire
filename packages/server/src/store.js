@@ -16,7 +16,7 @@ import {
   signCheckpointWith,
   identityFromPem,
   generateIdentity,
-} from '@proofwire/core';
+} from '@proof_wire/core';
 import { newId, now, today, transact } from './db.js';
 
 /**
@@ -237,7 +237,7 @@ export class Store {
    * @param {object} args
    * @param {string} args.orgId
    * @param {string} args.logId
-   * @param {import('@proofwire/core').Receipt[]} args.receipts
+   * @param {import('@proof_wire/core').Receipt[]} args.receipts
    * @param {string} [args.batchId]  Client-supplied; makes a retry idempotent.
    * @returns {{ accepted: number, size: number, head: string, root: string, duplicate: boolean }}
    */
@@ -514,7 +514,7 @@ export class Store {
    * @param {string} orgId
    * @param {string} logId
    * @param {import('./signer.js').Signer} signer
-   * @returns {Promise<import('@proofwire/core').Checkpoint>}
+   * @returns {Promise<import('@proof_wire/core').Checkpoint>}
    */
   async checkpoint(orgId, logId, signer) {
     const log = this.log(orgId, logId);
@@ -576,7 +576,7 @@ export class Store {
    * @param {string} orgId
    * @param {string} logId
    * @param {number} size
-   * @param {import('@proofwire/core').Signature} sig
+   * @param {import('@proof_wire/core').Signature} sig
    */
   addWitnessSignature(orgId, logId, size, sig) {
     const row = this.db
@@ -956,7 +956,7 @@ export class Store {
    * through a `Signer`, which may hold no key material at all.
    *
    * @param {'hub'|'witness'} role
-   * @returns {import('@proofwire/core').Identity}
+   * @returns {import('@proof_wire/core').Identity}
    */
   serverIdentity(role) {
     const row = this.activeServerKey(role);

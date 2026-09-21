@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
 import path from 'node:path';
-import { ProofLog, verifyBundle, Policy, verifyInclusion, unhex, generateIdentity } from '@proofwire/core';
-import { McpProxy, auditPolicyMetrics } from '@proofwire/proxy';
-import { RemoteSink, hubApprover, fetchPolicy } from '@proofwire/proxy/remote';
-import { approverFrom } from '@proofwire/proxy/approve';
+import { ProofLog, verifyBundle, Policy, verifyInclusion, unhex, generateIdentity } from '@proof_wire/core';
+import { McpProxy, auditPolicyMetrics } from '@proof_wire/proxy';
+import { RemoteSink, hubApprover, fetchPolicy } from '@proof_wire/proxy/remote';
+import { approverFrom } from '@proof_wire/proxy/approve';
 import { c, out, err, ok, bad, warn, info, heading, kv, table, outcomeBadge, parseArgs } from './ui.js';
 import { witnessKeysFrom } from './witness-keys.js';
 import {
@@ -641,7 +641,7 @@ function cmdStats(args) {
 /** @param {any} args */
 async function cmdDash(args) {
   const { dir } = loadConfig(args);
-  const { serve } = await import('@proofwire/dashboard');
+  const { serve } = await import('@proof_wire/dashboard');
   const port = Number(args.port ?? 7788);
   const url = await serve({ dir, port });
   heading('Proofwire dashboard');

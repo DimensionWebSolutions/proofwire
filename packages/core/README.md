@@ -1,4 +1,4 @@
-# @proofwire/core
+# @proof_wire/core
 
 Signed, hash-chained, Merkle-anchored receipts for AI agent actions.
 **Zero dependencies** — Node's standard library only.
@@ -8,11 +8,11 @@ Signed, hash-chained, Merkle-anchored receipts for AI agent actions.
 [![Dependencies](https://img.shields.io/badge/dependencies-0-brightgreen.svg)](#)
 
 ```bash
-npm install @proofwire/core
+npm install @proof_wire/core
 ```
 
 ```js
-import { ProofLog, Policy, History } from '@proofwire/core';
+import { ProofLog, Policy, History } from '@proof_wire/core';
 
 const log = ProofLog.open('.proofwire');
 const decision = policy.decide(
@@ -52,10 +52,10 @@ Ed25519 test vectors, pinning signature bytes rather than round-trips.
 | Package | What it is |
 | --- | --- |
 | [`proofwire`](https://npmjs.com/package/proofwire) | The `pw` CLI — start here |
-| [`@proofwire/core`](https://npmjs.com/package/@proofwire/core) | Receipts, Merkle log, policy engine. Zero dependencies. |
-| [`@proofwire/proxy`](https://npmjs.com/package/@proofwire/proxy) | The MCP proxy and the hub client |
-| [`@proofwire/server`](https://npmjs.com/package/@proofwire/server) | The multi-tenant hub |
-| [`@proofwire/dashboard`](https://npmjs.com/package/@proofwire/dashboard) | Local read-only dashboard |
+| [`@proof_wire/core`](https://npmjs.com/package/@proof_wire/core) | Receipts, Merkle log, policy engine. Zero dependencies. |
+| [`@proof_wire/proxy`](https://npmjs.com/package/@proof_wire/proxy) | The MCP proxy and the hub client |
+| [`@proof_wire/server`](https://npmjs.com/package/@proof_wire/server) | The multi-tenant hub |
+| [`@proof_wire/dashboard`](https://npmjs.com/package/@proof_wire/dashboard) | Local read-only dashboard |
 
 Full documentation: **https://github.com/proofwire/proofwire**
 

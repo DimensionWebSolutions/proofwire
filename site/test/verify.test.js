@@ -10,14 +10,14 @@ import {
   canonicalize as coreCanonicalize,
   generateIdentity,
   cosign,
-} from '@proofwire/core';
+} from '@proof_wire/core';
 import * as web from '../verify.js';
 
 /**
  * The browser verifier against the Node one.
  *
  * `site/verify.js` is a second implementation that shares no code with
- * @proofwire/core. Two implementations that disagree on any input mean one of
+ * @proof_wire/core. Two implementations that disagree on any input mean one of
  * them is wrong, so nearly everything here is a differential test: run both
  * over the same bundle and require the same verdict.
  *

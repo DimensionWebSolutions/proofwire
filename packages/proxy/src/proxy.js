@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { LineFramer, encode, isRequest, isResponse, toolRefusal } from './jsonrpc.js';
-import { History, redact, entryHash } from '@proofwire/core';
+import { History, redact, entryHash } from '@proof_wire/core';
 
 /**
  * A transparent MCP proxy that enforces policy and writes receipts.
@@ -78,7 +78,7 @@ export function extractMetrics(config, target, params) {
  * This is the same failure the policy loader refuses to allow for a typo'd
  * operator, and it deserves the same treatment.
  *
- * @param {import('@proofwire/core').Policy} policy
+ * @param {import('@proof_wire/core').Policy} policy
  * @param {Record<string, any>} metricsConfig
  * @returns {string[]} Human-readable warnings; empty when the policy is wired up.
  */
@@ -145,8 +145,8 @@ export function launchSpec(command, args) {
 
 /**
  * @typedef {object} ProxyOptions
- * @property {import('@proofwire/core').ProofLog} log
- * @property {import('@proofwire/core').Policy} policy
+ * @property {import('@proof_wire/core').ProofLog} log
+ * @property {import('@proof_wire/core').Policy} policy
  * @property {{ agent: string, session: string, principal: string }} actor
  * @property {(req: any) => Promise<{approved: boolean, by: string, note?: string}>} approver
  * @property {string} command
@@ -274,7 +274,7 @@ export class McpProxy extends EventEmitter {
       this.history,
     );
 
-    /** @type {import('@proofwire/core').Decision['approval']} */
+    /** @type {import('@proof_wire/core').Decision['approval']} */
     let approval;
 
     if (decision.outcome === 'escalate') {
@@ -387,7 +387,7 @@ export class McpProxy extends EventEmitter {
 
   /**
    * @param {object} args
-   * @returns {import('@proofwire/core').Receipt}
+   * @returns {import('@proof_wire/core').Receipt}
    */
   _record(args) {
     const receipt = this.log.append({

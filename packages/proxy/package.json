@@ -1,5 +1,5 @@
 {
-  "name": "@proofwire/proxy",
+  "name": "@proof_wire/proxy",
   "version": "0.2.0",
   "type": "module",
   "description": "Drop-in MCP proxy that enforces Proofwire policy and writes receipts.",
@@ -25,7 +25,7 @@
     "src"
   ],
   "dependencies": {
-    "@proofwire/core": "0.2.0"
+    "@proof_wire/core": "0.2.0"
   },
   "engines": {
     "node": ">=20.11"

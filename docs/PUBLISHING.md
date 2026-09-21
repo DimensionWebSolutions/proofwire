@@ -39,14 +39,18 @@ npm run release
 
 ### First time only: create the scope
 
-The four `@proofwire/*` packages need an npm org to live in. It is free for
+The four `@proof_wire/*` packages need an npm org to live in. It is free for
 public packages:
 
-**https://www.npmjs.com/org/create** → name it `proofwire`.
+**https://www.npmjs.com/org/create** → name it `proof_wire`.
+
+The scope is `@proof_wire`, with an underscore, because `proofwire` was not
+available on npm. The GitHub organisation and the unscoped CLI are still
+`proofwire`; only the four library packages carry the underscore.
 
 Without it those four fail to publish, and it is not optional for the CLI
-either: the unscoped `proofwire` package depends on `@proofwire/core` and
-`@proofwire/proxy`, so a CLI published without them installs nowhere.
+either: the unscoped `proofwire` package depends on `@proof_wire/core` and
+`@proof_wire/proxy`, so a CLI published without them installs nowhere.
 
 ### What the script does
 
@@ -79,7 +83,7 @@ credential sits on a laptop.
 ### Setup, once
 
 1. On npm: **Access Tokens → Generate New Token → Granular Access Token**.
-   Scope it to the `proofwire` packages and the `@proofwire` org, with
+   Scope it to the `proofwire` packages and the `@proof_wire` org, with
    *Read and write*. Set an expiry.
 2. On GitHub: **Settings → Secrets and variables → Actions → New repository
    secret**, named `NPM_TOKEN`.

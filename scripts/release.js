@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 /**
- * Dependency order. `@proofwire/core` has no dependents above it; the CLI
+ * Dependency order. `@proof_wire/core` has no dependents above it; the CLI
  * depends on the proxy, so it goes last. Publishing out of order leaves a
  * package on the registry whose dependency does not exist yet — briefly
  * uninstallable, and not fixable by unpublishing.
@@ -114,15 +114,15 @@ function preflight() {
   // 2. Does the scope exist and can this account write to it?
   if (who) {
     try {
-      const orgs = JSON.parse(run('npm', ['org', 'ls', 'proofwire', '--json']));
+      const orgs = JSON.parse(run('npm', ['org', 'ls', 'proof_wire', '--json']));
       console.log(
-        `  ${GREEN('✓')} scope  @proofwire reachable ${DIM(`(${Object.keys(orgs).length} member(s))`)}`,
+        `  ${GREEN('✓')} scope  @proof_wire reachable ${DIM(`(${Object.keys(orgs).length} member(s))`)}`,
       );
     } catch {
-      console.log(`  ${YELLOW('!')} scope  cannot read the @proofwire org`);
+      console.log(`  ${YELLOW('!')} scope  cannot read the @proof_wire org`);
       blocking.push(
-        'Create the free org at https://www.npmjs.com/org/create (name: proofwire).\n' +
-          '     Without it, the four @proofwire/* packages cannot be published.\n' +
+        'Create the free org at https://www.npmjs.com/org/create (name: proof_wire).\n' +
+          '     Without it, the four @proof_wire/* packages cannot be published.\n' +
           '     The unscoped `proofwire` CLI would still publish.',
       );
     }

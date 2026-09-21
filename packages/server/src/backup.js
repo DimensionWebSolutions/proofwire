@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
-import { canonicalBytes } from '@proofwire/core';
+import { canonicalBytes } from '@proof_wire/core';
 import { openDatabase, openReadOnly, now } from './db.js';
 import { Store } from './store.js';
 
@@ -251,7 +251,7 @@ export function restore(args) {
  *
  * @param {string} database
  * @param {object} [opts]
- * @param {import('@proofwire/core').Checkpoint[]} [opts.reference]
+ * @param {import('@proof_wire/core').Checkpoint[]} [opts.reference]
  *   Checkpoints obtained from outside this database — from a witness, an
  *   auditor, or a previous export.
  * @returns {{ ok: boolean, logs: object[], selfReferential: boolean }}

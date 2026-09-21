@@ -12,7 +12,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { generateIdentity, buildReceipt, signReceipt, entryHash, GENESIS_PREV } from '@proofwire/core';
+import { generateIdentity, buildReceipt, signReceipt, entryHash, GENESIS_PREV } from '@proof_wire/core';
 import { Hub } from '../src/app.js';
 import { Auth } from '../src/auth.js';
 

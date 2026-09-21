@@ -17,7 +17,7 @@ import { createInterface } from 'node:readline';
  * @property {unknown} params      Already redacted — an approver sees a preview, not secrets.
  * @property {string} reason
  * @property {string[]} rules
- * @property {import('@proofwire/core').Actor} actor
+ * @property {import('@proof_wire/core').Actor} actor
  */
 
 /**

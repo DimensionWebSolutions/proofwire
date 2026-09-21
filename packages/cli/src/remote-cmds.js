@@ -1,8 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { ProofLog, Policy, verifyBundle } from '@proofwire/core';
-import { RemoteSink, fetchPolicy } from '@proofwire/proxy/remote';
+import { ProofLog, Policy, verifyBundle } from '@proof_wire/core';
+import { RemoteSink, fetchPolicy } from '@proof_wire/proxy/remote';
 import { c, out, ok, bad, warn, info, heading, kv, table } from './ui.js';
 import { witnessKeysFrom } from './witness-keys.js';
 

@@ -5,7 +5,7 @@ import {
   identityFromPublicKey,
   sign as signLocally,
   verify,
-} from '@proofwire/core';
+} from '@proof_wire/core';
 import { newId, now } from './db.js';
 
 /**

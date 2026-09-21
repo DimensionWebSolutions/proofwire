@@ -28,7 +28,7 @@ export class RemoteSink {
    * @param {string} opts.url       Hub base URL.
    * @param {string} opts.token     API key with `receipts:write`.
    * @param {string} opts.log       Log slug.
-   * @param {import('@proofwire/core').ProofLog} opts.localLog
+   * @param {import('@proof_wire/core').ProofLog} opts.localLog
    * @param {number} [opts.flushMs]
    * @param {number} [opts.batchSize]
    * @param {(level: string, msg: string) => void} [opts.onLog]
@@ -212,7 +212,7 @@ export class RemoteSink {
    * A short digest of a batch, so the same receipts always produce the same
    * batch id and a different set never does.
    *
-   * @param {import('@proofwire/core').Receipt[]} slice
+   * @param {import('@proof_wire/core').Receipt[]} slice
    */
   _salt(slice) {
     return slice[slice.length - 1].attest.sig.slice(0, 16).replace(/[^A-Za-z0-9]/g, '');

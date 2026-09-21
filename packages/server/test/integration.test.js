@@ -5,10 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { ProofLog, Policy, verifyBundle } from '@proofwire/core';
-import { McpProxy } from '@proofwire/proxy';
-import { LineFramer } from '@proofwire/proxy/jsonrpc';
-import { RemoteSink, hubApprover, fetchPolicy } from '@proofwire/proxy/remote';
+import { ProofLog, Policy, verifyBundle } from '@proof_wire/core';
+import { McpProxy } from '@proof_wire/proxy';
+import { LineFramer } from '@proof_wire/proxy/jsonrpc';
+import { RemoteSink, hubApprover, fetchPolicy } from '@proof_wire/proxy/remote';
 import { Hub } from '../src/app.js';
 import { Auth } from '../src/auth.js';
 

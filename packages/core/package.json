@@ -1,5 +1,5 @@
 {
-  "name": "@proofwire/core",
+  "name": "@proof_wire/core",
   "version": "0.2.0",
   "type": "module",
   "description": "Signed, hash-chained, Merkle-anchored receipts for AI agent actions.",

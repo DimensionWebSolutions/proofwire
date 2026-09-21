@@ -37,7 +37,7 @@ jobs:
         run: npm run demo
 
   core-compat:
-    # @proofwire/core claims Node >= 20.11 and has no dependencies, including
+    # @proof_wire/core claims Node >= 20.11 and has no dependencies, including
     # no node:sqlite. An engine range nothing exercises is a guess, so this
     # runs the core and proxy suites on the oldest version they claim.
     runs-on: ubuntu-latest

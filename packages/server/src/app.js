@@ -9,7 +9,7 @@ import {
   unhex,
   hex,
   verifyConsistency,
-} from '@proofwire/core';
+} from '@proof_wire/core';
 import { openDatabase, newId, now, transact } from './db.js';
 import { Store, StoreError } from './store.js';
 import { signerFor, selfTest } from './signer.js';

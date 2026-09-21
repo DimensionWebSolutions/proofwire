@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { ProofLog, Policy, entryHash } from '@proofwire/core';
+import { ProofLog, Policy, entryHash } from '@proof_wire/core';
 import { McpProxy, extractMetrics } from '../src/proxy.js';
 import { LineFramer, isRequest, isResponse, toolRefusal } from '../src/jsonrpc.js';
 import { denyingApprover } from '../src/approve.js';
@@ -382,7 +382,7 @@ test('a full session leaves an audit that verifies and a bundle that travels', a
   assert.equal(log.entries.filter((r) => r.phase === 'outcome').length, 2);
   assert.equal(log.entries.filter((r) => r.decision.outcome === 'deny').length, 1);
 
-  const { verifyBundle } = await import('@proofwire/core');
+  const { verifyBundle } = await import('@proof_wire/core');
   const bundle = JSON.parse(JSON.stringify(log.bundle()));
   const res = verifyBundle(bundle);
   assert.ok(res.ok, JSON.stringify(res.issues));

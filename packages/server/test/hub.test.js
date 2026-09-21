@@ -11,7 +11,7 @@ import {
   verifyConsistency,
   unhex,
   canonicalize,
-} from '@proofwire/core';
+} from '@proof_wire/core';
 import { Hub } from '../src/app.js';
 import { Auth } from '../src/auth.js';
 

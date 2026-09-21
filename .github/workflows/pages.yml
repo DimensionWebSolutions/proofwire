@@ -34,7 +34,7 @@ jobs:
         with:
           node-version: '22'
 
-      # The verifier test imports @proofwire/core through the workspace link.
+      # The verifier test imports @proof_wire/core through the workspace link.
       - run: npm install --no-audit --no-fund
 
       - name: Test the site
