@@ -2,8 +2,13 @@
 
 ## Reporting
 
-Email **security@proofwire.dev**. If you prefer, open a GitHub security
-advisory instead — both reach the same place.
+Use GitHub's private vulnerability reporting:
+
+**https://github.com/DimensionWebSolutions/proofwire/security/advisories/new**
+
+It reaches the maintainers privately and keeps the fix and the disclosure in
+one place. There is no security mailbox yet; this file will say so when
+there is one.
 
 Please include enough to reproduce: a failing test, a crafted bundle, or the
 sequence of API calls. A proof-of-concept that makes `pw check` accept

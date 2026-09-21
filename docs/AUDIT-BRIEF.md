@@ -179,5 +179,6 @@ you find that I got wrong. That is a condition of the engagement, not a
 concession: a security product whose audit is summarised by its vendor has not
 been audited in any sense a buyer should care about.
 
-Findings can also go to `security@proofwire.dev` under the policy in
-[`SECURITY.md`](../SECURITY.md).
+Findings can also be reported privately, under the policy in
+[`SECURITY.md`](../SECURITY.md), through GitHub's private vulnerability
+reporting.
