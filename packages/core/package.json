@@ -4,13 +4,16 @@
   "type": "module",
   "description": "Signed, hash-chained, Merkle-anchored receipts for AI agent actions.",
   "license": "Apache-2.0",
-  "main": "./src/index.js",
-  "exports": {
-    ".": "./src/index.js"
+  "author": "IdeaboticsAI",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DimensionWebSolutions/proofwire.git",
+    "directory": "packages/core"
   },
-  "files": [
-    "src"
-  ],
+  "homepage": "https://github.com/DimensionWebSolutions/proofwire#readme",
+  "bugs": {
+    "url": "https://github.com/DimensionWebSolutions/proofwire/issues"
+  },
   "keywords": [
     "ai-agents",
     "audit",
@@ -20,7 +23,17 @@
     "compliance",
     "mcp"
   ],
+  "main": "./src/index.js",
+  "exports": {
+    ".": "./src/index.js"
+  },
+  "files": [
+    "src"
+  ],
   "engines": {
     "node": ">=20.11"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

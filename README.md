@@ -37,7 +37,7 @@ append-only log that an outside party can verify without trusting you.
 ## See it in one command
 
 ```bash
-git clone https://github.com/proofwire/proofwire && cd proofwire
+git clone https://github.com/DimensionWebSolutions/proofwire && cd proofwire
 npm install
 npm run demo
 ```

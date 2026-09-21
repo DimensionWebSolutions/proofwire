@@ -4,6 +4,16 @@
   "type": "module",
   "description": "Proofwire hub — multi-tenant transparency log, policy registry, approvals, and witness service.",
   "license": "Apache-2.0",
+  "author": "IdeaboticsAI",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DimensionWebSolutions/proofwire.git",
+    "directory": "packages/server"
+  },
+  "homepage": "https://github.com/DimensionWebSolutions/proofwire#readme",
+  "bugs": {
+    "url": "https://github.com/DimensionWebSolutions/proofwire/issues"
+  },
   "main": "./src/app.js",
   "exports": {
     ".": "./src/app.js",
@@ -21,5 +31,8 @@
   },
   "engines": {
     "node": ">=22.5"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

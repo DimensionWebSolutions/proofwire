@@ -4,6 +4,16 @@
   "type": "module",
   "description": "Local read-only dashboard for a Proofwire log.",
   "license": "Apache-2.0",
+  "author": "IdeaboticsAI",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DimensionWebSolutions/proofwire.git",
+    "directory": "packages/dashboard"
+  },
+  "homepage": "https://github.com/DimensionWebSolutions/proofwire#readme",
+  "bugs": {
+    "url": "https://github.com/DimensionWebSolutions/proofwire/issues"
+  },
   "main": "./src/server.js",
   "exports": {
     ".": "./src/server.js"
@@ -17,5 +27,8 @@
   },
   "engines": {
     "node": ">=20.11"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

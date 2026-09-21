@@ -4,13 +4,16 @@
   "type": "module",
   "description": "Tamper-evident receipts for AI agent actions. Policy, proof, and audit for MCP.",
   "license": "Apache-2.0",
-  "bin": {
-    "pw": "./src/bin.js",
-    "proofwire": "./src/bin.js"
+  "author": "IdeaboticsAI",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DimensionWebSolutions/proofwire.git",
+    "directory": "packages/cli"
   },
-  "files": [
-    "src"
-  ],
+  "homepage": "https://github.com/DimensionWebSolutions/proofwire#readme",
+  "bugs": {
+    "url": "https://github.com/DimensionWebSolutions/proofwire/issues"
+  },
   "keywords": [
     "mcp",
     "ai-agents",
@@ -18,6 +21,13 @@
     "compliance",
     "transparency-log",
     "eu-ai-act"
+  ],
+  "bin": {
+    "pw": "./src/bin.js",
+    "proofwire": "./src/bin.js"
+  },
+  "files": [
+    "src"
   ],
   "dependencies": {
     "@proofwire/core": "0.2.0",

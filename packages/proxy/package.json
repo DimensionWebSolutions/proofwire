@@ -4,6 +4,16 @@
   "type": "module",
   "description": "Drop-in MCP proxy that enforces Proofwire policy and writes receipts.",
   "license": "Apache-2.0",
+  "author": "IdeaboticsAI",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DimensionWebSolutions/proofwire.git",
+    "directory": "packages/proxy"
+  },
+  "homepage": "https://github.com/DimensionWebSolutions/proofwire#readme",
+  "bugs": {
+    "url": "https://github.com/DimensionWebSolutions/proofwire/issues"
+  },
   "main": "./src/proxy.js",
   "exports": {
     ".": "./src/proxy.js",
@@ -19,5 +29,8 @@
   },
   "engines": {
     "node": ">=20.11"
+  },
+  "publishConfig": {
+    "access": "public"
   }
 }

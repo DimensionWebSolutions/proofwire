@@ -20,5 +20,13 @@
     "demo": "node examples/demo.js",
     "pw": "node packages/cli/src/bin.js",
     "hub": "node --no-warnings=ExperimentalWarning packages/server/src/bin.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/DimensionWebSolutions/proofwire.git"
+  },
+  "homepage": "https://github.com/DimensionWebSolutions/proofwire#readme",
+  "bugs": {
+    "url": "https://github.com/DimensionWebSolutions/proofwire/issues"
   }
 }
