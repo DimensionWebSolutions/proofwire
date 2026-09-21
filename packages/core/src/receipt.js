@@ -310,7 +310,7 @@ export function verifyChain(receipts, keyring, opts = {}) {
       issues.push({
         seq: receipt.seq,
         kind: 'chain',
-        message: `chain break: prev is ${receipt.prev.slice(0, 12)}…, expected ${prev.slice(0, 12)}…`,
+        message: `chain break: prev is ${String(receipt.prev).slice(0, 12)}…, expected ${prev.slice(0, 12)}…`,
       });
     }
     if (lastTs && receipt.ts < lastTs) {

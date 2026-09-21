@@ -503,33 +503,126 @@ export function verifyBundle(bundle, opts = {}) {
   let checked = 0;
   /** @type {import('./receipt.js').Receipt[]} */
   const receipts = [];
+  /** @type {Buffer[]} */
+  const leaves = [];
 
-  for (const { receipt, proof } of bundle.entries ?? []) {
-    receipts.push(receipt);
-    const ok = verifyInclusion({
-      leafHash: leafHash(canonicalBytes(receipt)),
-      index: receipt.seq,
-      treeSize: bundle.treeSize,
-      proof: (proof ?? []).map(unhex),
-      root,
-    });
-    if (!ok) {
-      issues.push(`entry ${receipt.seq} is not provably part of the logged tree`);
+  for (const entry of bundle.entries ?? []) {
+    // A verifier is fed hostile data by definition. One malformed entry has to
+    // be reported, not allowed to throw and take the whole check down with it.
+    try {
+      const { receipt, proof } = entry;
+      // Everything below assumes an object with a sequence number. Anything
+      // else is reported here, before it can reach code that would throw.
+      if (!receipt || typeof receipt !== 'object' || !Number.isInteger(receipt.seq)) {
+        throw new Error('entry carries no receipt with a sequence number');
+      }
+      const leaf = leafHash(canonicalBytes(receipt));
+      receipts.push(receipt);
+      leaves.push(leaf);
+
+      const ok = verifyInclusion({
+        leafHash: leaf,
+        index: receipt.seq,
+        treeSize: bundle.treeSize,
+        proof: (proof ?? []).map(unhex),
+        root,
+      });
+      if (!ok) {
+        issues.push(`entry ${receipt.seq} is not provably part of the logged tree`);
+      }
+    } catch (err) {
+      issues.push(`malformed entry: ${/** @type {Error} */ (err).message}`);
     }
     checked++;
   }
 
-  // A complete bundle must also form an unbroken chain. A filtered one cannot,
-  // by construction, so inclusion proofs carry the weight there instead.
+  // ── what the bundle claims about itself ────────────────────────────────
+  //
+  // Every inclusion proof above can be perfectly genuine while entries have
+  // simply been left out, so the *contents* of a bundle passing says nothing
+  // about whether it is the *whole* log. A bundle that declares itself
+  // complete has to actually be, and its own summary fields have to agree with
+  // the entries it carries.
+  //
+  // This was missing: a bundle with its last entries removed and `partial`
+  // left false verified clean, as did one whose `head` had been replaced.
+  const treeSize = bundle.treeSize;
+  if (!Number.isInteger(treeSize) || treeSize < 0) {
+    issues.push('bundle treeSize is not a non-negative integer');
+  }
+
+  // The head names the last entry. When that entry is present — always, in a
+  // complete bundle — the claim can simply be checked.
+  const tip = receipts.find((r) => r.seq === treeSize - 1);
+  if (tip && entryHash(tip) !== bundle.head) {
+    issues.push(
+      `bundle head ${String(bundle.head).slice(0, 16)}… is not the hash of its final entry`,
+    );
+  }
+
   if (!bundle.partial) {
-    const chain = verifyChain(receipts, keyring);
-    for (const i of chain.issues) issues.push(`entry ${i.seq}: ${i.message}`);
-  } else {
-    for (const receipt of receipts) {
-      for (const i of verifyReceipt(receipt, keyring)) {
-        issues.push(`entry ${i.seq}: ${i.message}`);
+    if (receipts.length !== treeSize) {
+      issues.push(
+        `bundle is marked complete but holds ${receipts.length} of ${treeSize} entries — ` +
+          `entries were left out`,
+      );
+    } else {
+      // Rebuild the tree from the entries alone. One incremental pass yields
+      // the final root and every historical root a checkpoint names, without
+      // the quadratic cost of recomputing each from scratch.
+      const wanted = new Set(
+        (bundle.checkpoints ?? []).map((cp) => cp?.body?.size).filter(Number.isInteger),
+      );
+      const tree = new MerkleTree();
+      /** @type {Map<number, string>} */
+      const prefixRoots = new Map();
+      leaves.forEach((leaf, k) => {
+        tree.append(leaf);
+        if (wanted.has(k + 1)) prefixRoots.set(k + 1, hex(tree.root));
+      });
+
+      if (hex(tree.root) !== bundle.root) {
+        issues.push('bundle root does not match the root of its own entries');
+      }
+      if (treeSize === 0 && bundle.head !== GENESIS_PREV) {
+        issues.push('an empty bundle must carry the genesis head');
+      }
+
+      for (const cp of bundle.checkpoints ?? []) {
+        const size = cp?.body?.size;
+        if (!Number.isInteger(size)) continue;
+        if (size > treeSize) {
+          issues.push(`checkpoint at size ${size} covers more entries than this bundle holds`);
+          continue;
+        }
+        if (prefixRoots.get(size) !== cp.body.root) {
+          issues.push(
+            `checkpoint at size ${size} names root ${String(cp.body.root).slice(0, 16)}…, but ` +
+              `this bundle's own entries hash to a different one — history was rewritten`,
+          );
+        }
       }
     }
+  }
+
+  // A complete bundle must also form an unbroken chain. A filtered one cannot,
+  // by construction, so inclusion proofs carry the weight there instead.
+  try {
+    if (!bundle.partial) {
+      const chain = verifyChain(receipts, keyring);
+      for (const i of chain.issues) issues.push(`entry ${i.seq}: ${i.message}`);
+    } else {
+      for (const receipt of receipts) {
+        for (const i of verifyReceipt(receipt, keyring)) {
+          issues.push(`entry ${i.seq}: ${i.message}`);
+        }
+      }
+    }
+  } catch (err) {
+    // Malformed fields inside an otherwise well-shaped receipt. Report it as
+    // a failure of the bundle; never let it escape as an exception that a
+    // caller might mistake for "could not check, so carry on".
+    issues.push(`could not verify the receipts: ${/** @type {Error} */ (err).message}`);
   }
 
   return { ok: issues.length === 0, issues, checked };

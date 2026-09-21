@@ -346,3 +346,136 @@ test('re-witnessing the same root replaces rather than duplicates', async () => 
   assert.equal(stored.sigs.length, 2, 'one log signature plus one witness, not three');
   assert.ok(log.audit().ok);
 });
+
+// ── a bundle has to be what it says it is ────────────────────────────────
+
+test('a bundle marked complete but missing its tail is rejected', () => {
+  // Every remaining inclusion proof is genuine, so a check that only looks at
+  // what is present passes. This was accepted before completeness was checked.
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 8);
+
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+  assert.equal(bundle.partial, false);
+  assert.ok(verifyBundle(bundle).ok, 'the honest bundle must still verify');
+
+  bundle.entries = bundle.entries.slice(0, 5);
+  const res = verifyBundle(bundle);
+  assert.equal(res.ok, false);
+  assert.ok(
+    res.issues.some((m) => /marked complete but holds 5 of 8 entries/.test(m)),
+    `expected a completeness finding, got: ${JSON.stringify(res.issues)}`,
+  );
+});
+
+test('a bundle whose head was replaced is rejected', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 6);
+
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+  bundle.head = 'ab'.repeat(32);
+  const res = verifyBundle(bundle);
+  assert.equal(res.ok, false);
+  assert.ok(res.issues.some((m) => /is not the hash of its final entry/.test(m)));
+});
+
+test('a partial bundle that includes the tip still has its head checked', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 10);
+
+  const bundle = JSON.parse(JSON.stringify(log.bundle({ filter: (r) => r.seq % 3 === 0 || r.seq === 9 })));
+  assert.equal(bundle.partial, true);
+  assert.ok(verifyBundle(bundle).ok, 'a genuine partial bundle must still verify');
+
+  bundle.head = 'cd'.repeat(32);
+  assert.equal(verifyBundle(bundle).ok, false);
+});
+
+test('a bundle whose root does not match its own entries is rejected', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 7);
+
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+  bundle.root = 'ef'.repeat(32);
+  const res = verifyBundle(bundle);
+  assert.equal(res.ok, false);
+  assert.ok(res.issues.some((m) => /does not match the root of its own entries/.test(m)));
+});
+
+test('an insider who re-signs history cannot keep the old checkpoint in the bundle', () => {
+  // The insider edits an entry and re-signs the whole chain, so signatures,
+  // links and inclusion proofs are all internally perfect. The checkpoint that
+  // was signed before the edit is what convicts them, and now the bundle
+  // itself says so rather than leaving it to a separate audit.
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 8);
+  log.checkpoint();
+
+  const identity = identityFromPem(fs.readFileSync(path.join(dir, 'key.pem'), 'utf8'));
+  const originals = fs
+    .readFileSync(path.join(dir, 'entries.jsonl'), 'utf8')
+    .trim()
+    .split('\n')
+    .map((l) => JSON.parse(l));
+
+  let prev = GENESIS_PREV;
+  const rebuilt = originals.map((r, i) => {
+    const { attest: _drop, ...body } = r;
+    if (i === 3) body.action = { ...body.action, target: 'stripe.something-else' };
+    const resigned = signReceipt(identity, { ...body, seq: i, prev });
+    prev = entryHash(resigned);
+    return canonicalize(resigned);
+  });
+  fs.writeFileSync(path.join(dir, 'entries.jsonl'), rebuilt.join('\n') + '\n');
+
+  const bundle = JSON.parse(JSON.stringify(ProofLog.open(dir, { readOnly: true }).bundle()));
+  const res = verifyBundle(bundle);
+  assert.equal(res.ok, false);
+  assert.ok(
+    res.issues.some((m) => /history was rewritten/.test(m)),
+    `expected the checkpoint to convict the rewrite, got: ${JSON.stringify(res.issues)}`,
+  );
+});
+
+test('a checkpoint from beyond the bundle is reported', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 6);
+  log.checkpoint();
+
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+  bundle.entries = bundle.entries.slice(0, 4);
+  bundle.treeSize = 4;
+  const res = verifyBundle(bundle);
+  assert.equal(res.ok, false);
+});
+
+test('malformed entries are reported instead of crashing the verifier', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 3);
+
+  for (const junk of [null, {}, { receipt: null }, { receipt: 5, proof: 'x' }, { receipt: { seq: 0 }, proof: ['zz'] }]) {
+    const bundle = JSON.parse(JSON.stringify(log.bundle()));
+    bundle.entries.push(junk);
+    let res;
+    assert.doesNotThrow(() => { res = verifyBundle(bundle); }, `threw on ${JSON.stringify(junk)}`);
+    assert.equal(res.ok, false, `accepted ${JSON.stringify(junk)}`);
+  }
+});
+
+test('an empty log exports a bundle that verifies, and a forged empty head does not', () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+  assert.equal(bundle.entries.length, 0);
+  assert.ok(verifyBundle(bundle).ok, JSON.stringify(verifyBundle(bundle).issues));
+
+  bundle.head = 'ab'.repeat(32);
+  assert.equal(verifyBundle(bundle).ok, false);
+});
