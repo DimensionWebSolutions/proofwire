@@ -19,7 +19,9 @@
     "test": "node --no-warnings=ExperimentalWarning --test",
     "demo": "node examples/demo.js",
     "pw": "node packages/cli/src/bin.js",
-    "hub": "node --no-warnings=ExperimentalWarning packages/server/src/bin.js"
+    "hub": "node --no-warnings=ExperimentalWarning packages/server/src/bin.js",
+    "release": "node scripts/release.js",
+    "release:dry": "node scripts/release.js --dry-run"
   },
   "repository": {
     "type": "git",
