@@ -37,6 +37,10 @@ docker compose up -d
 docker compose exec hub node packages/server/src/bin.js bootstrap
 ```
 
+> **Not yet exercised:** the Dockerfile and compose file are included but have
+> not been built in CI. Everything else in this guide has been run. From source:
+> `npm install && npm run hub -- bootstrap && npm run hub -- serve`.
+
 `bootstrap` prints an admin password and two API keys, once:
 
 ```
@@ -295,8 +299,16 @@ auditor, the insurer, the counterparty — not by the log's owner.
 Auditors then demand the signatures:
 
 ```bash
-pw check evidence.json --witnesses 2
+pw check evidence.json --witnesses 2 --witness-keys witnesses.json
 ```
+
+`witnesses.json` holds the witnesses' public keys **as their operators
+published them** — never taken from the bundle. A bundle's own keyring comes
+from the party whose honesty is in question, so it cannot vouch for witnesses:
+an operator could add any number of fresh keys and "witness" their own
+checkpoints. Only signatures from keys you pinned are counted, and asking for
+`--witnesses` without pinning any is refused rather than answered by counting
+whatever the bundle contains.
 
 ---
 

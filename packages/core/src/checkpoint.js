@@ -100,13 +100,35 @@ export function cosign(checkpoint, witness) {
 }
 
 /**
+ * Check a checkpoint's signatures.
+ *
+ * **Witnesses have to be pinned.** A checkpoint's `role` field is a label, not
+ * something the signature covers, and a bundle's keyring is supplied by the same
+ * party whose honesty is in question. So a witness count taken from the bundle's
+ * own keyring proves nothing: an operator can invent as many witnesses as they
+ * like by adding fresh keys. The verifier has to bring the witnesses' public
+ * keys from somewhere else — `trustedWitnesses`, a map of kid to public key
+ * obtained from the witness operators.
+ *
+ * With `trustedWitnesses`:
+ *   - only `witness` signatures made by a pinned key are counted, and they are
+ *     checked against the *pinned* key, never the bundle's;
+ *   - a pinned witness's signature relabelled as the log's does not count as a
+ *     log signature;
+ *   - witness signatures from keys the verifier has never heard of are ignored
+ *     rather than counted.
+ *
+ * Without it the count is informational only, and callers that demand witnesses
+ * must not rely on it.
+ *
  * @param {Checkpoint} checkpoint
  * @param {import('./receipt.js').Keyring} keyring
  * @param {object} [opts]
  * @param {number} [opts.minWitnesses=0]  Reject a checkpoint with fewer valid
- *   witness signatures than this. Set above zero to refuse to trust the
- *   operator's word alone.
- * @returns {{ ok: boolean, issues: string[], signers: string[], witnesses: number }}
+ *   witness signatures than this.
+ * @param {Record<string, string>} [opts.trustedWitnesses]  kid → public key
+ *   (base64url), from outside the bundle.
+ * @returns {{ ok: boolean, issues: string[], signers: string[], witnesses: number, pinned: boolean }}
  */
 export function verifyCheckpoint(checkpoint, keyring, opts = {}) {
   /** @type {string[]} */
@@ -114,9 +136,12 @@ export function verifyCheckpoint(checkpoint, keyring, opts = {}) {
   /** @type {string[]} */
   const signers = [];
   let witnesses = 0;
+  const trusted = opts.trustedWitnesses;
+  const pinned = Boolean(trusted) && typeof trusted === 'object';
+  const has = (obj, key) => obj != null && Object.prototype.hasOwnProperty.call(obj, key);
 
   if (!checkpoint?.body || !Array.isArray(checkpoint.sigs)) {
-    return { ok: false, issues: ['malformed checkpoint'], signers, witnesses };
+    return { ok: false, issues: ['malformed checkpoint'], signers, witnesses, pinned };
   }
   if (checkpoint.body.v !== CHECKPOINT_VERSION) {
     issues.push(`unsupported checkpoint version ${checkpoint.body.v}`);
@@ -126,17 +151,31 @@ export function verifyCheckpoint(checkpoint, keyring, opts = {}) {
   let hasLogSig = false;
 
   for (const s of checkpoint.sigs) {
-    const pub = keyring[s.kid];
-    if (!pub) {
-      issues.push(`no public key for signer ${s.kid}`);
+    if (pinned && s?.role === 'witness') {
+      if (!has(trusted, s.kid)) continue; // a witness we were not told to trust
+      if (verify(trusted[s.kid], digest, s.sig)) {
+        signers.push(s.kid);
+        witnesses++;
+      } else {
+        issues.push(`invalid witness signature from ${s.kid}`);
+      }
       continue;
     }
-    if (!verify(pub, digest, s.sig)) {
+    if (pinned && s?.role === 'log' && has(trusted, s.kid)) {
+      issues.push(`signature from pinned witness ${s.kid} is labelled as the log's`);
+      continue;
+    }
+
+    if (!has(keyring, s?.kid)) {
+      issues.push(`no public key for signer ${s?.kid}`);
+      continue;
+    }
+    if (!verify(keyring[s.kid], digest, s.sig)) {
       issues.push(`invalid ${s.role} signature from ${s.kid}`);
       continue;
     }
     signers.push(s.kid);
-    if (s.role === 'witness') witnesses++;
+    if (s.role === 'witness') witnesses++; // unpinned: a claim, not evidence
     if (s.role === 'log') hasLogSig = true;
   }
 
@@ -147,7 +186,7 @@ export function verifyCheckpoint(checkpoint, keyring, opts = {}) {
     issues.push(`only ${witnesses} valid witness signature(s), policy requires ${min}`);
   }
 
-  return { ok: issues.length === 0, issues, signers, witnesses };
+  return { ok: issues.length === 0, issues, signers, witnesses, pinned };
 }
 
 /**

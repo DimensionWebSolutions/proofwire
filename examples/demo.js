@@ -232,7 +232,11 @@ async function main() {
 
   const cp = writable.checkpoints().at(-1);
   const cosigned = cosign(cosign(cp, w1), w2);
-  const cpCheck = verifyCheckpoint(cosigned, writable.keyring, { minWitnesses: 2 });
+  // Pinned: the witnesses' keys come from us here, not from the checkpoint.
+  const cpCheck = verifyCheckpoint(cosigned, writable.keyring, {
+    minWitnesses: 2,
+    trustedWitnesses: { [w1.kid]: w1.publicKey, [w2.kid]: w2.publicKey },
+  });
   say(`  ${cpCheck.ok ? GREEN('✓') : RED('✗')} checkpoint at size ${cp.body.size} carries ${cpCheck.witnesses} independent witness signatures`);
 
   // ── 5. Erasure ────────────────────────────────────────────────────────

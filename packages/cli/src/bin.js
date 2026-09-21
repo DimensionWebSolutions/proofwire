@@ -6,6 +6,7 @@ import { McpProxy, auditPolicyMetrics } from '@proofwire/proxy';
 import { RemoteSink, hubApprover, fetchPolicy } from '@proofwire/proxy/remote';
 import { approverFrom } from '@proofwire/proxy/approve';
 import { c, out, err, ok, bad, warn, info, heading, kv, table, outcomeBadge, parseArgs } from './ui.js';
+import { witnessKeysFrom } from './witness-keys.js';
 import {
   cmdRemote, cmdPush, cmdRemoteVerify, cmdPolicy, cmdCosign, loadRemotes, resolveRemote,
 } from './remote-cmds.js';
@@ -387,9 +388,11 @@ function cmdCheck(args) {
     return 2;
   }
   const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
+  const trustedWitnesses = witnessKeysFrom(args);
   const res = verifyBundle(bundle, {
     expectRoot: args.root,
     minWitnesses: Number(args.witnesses ?? 0),
+    trustedWitnesses,
   });
 
   heading(`Bundle · ${bundle.log}`);
@@ -403,6 +406,15 @@ function cmdCheck(args) {
 
   if (res.ok) {
     ok(c.bold('Verified. Every receipt is signed and provably part of this log.'));
+    const claimsWitnesses = (bundle.checkpoints ?? []).some((cp) =>
+      (cp.sigs ?? []).some((s) => s.role === 'witness'),
+    );
+    if (claimsWitnesses && !trustedWitnesses) {
+      out('');
+      warn('This bundle carries witness signatures, but none were checked against keys you chose.');
+      warn('The bundle\'s own keyring cannot vouch for its witnesses. Pin the ones you trust:');
+      warn(`  ${c.cyan('pw check <file> --witnesses N --witness-key <kid>=<publicKey>')}`);
+    }
     if (bundle.partial) {
       out('');
       warn('This is a filtered export. Each entry shown is proven genuine, but the');

@@ -52,7 +52,9 @@ only ≥ 20.11 and has no dependencies at all.
    attacker holding the signing key, who can re-sign every receipt. The
    consistency proof against a published root is what closes this.
 4. **A log operator cannot show two histories** to two auditors, given at least
-   one honest witness.
+   one honest witness **whose public key the auditor obtained independently**.
+   (Until recently the verifier counted witnesses against the bundle's own
+   keyring, which made this claim false — see item 7 below.)
 5. **A receipt reveals nothing about its payload** beyond size and a redacted
    preview, and destroying salts makes payloads permanently unopenable while
    leaving every proof intact.
@@ -141,6 +143,37 @@ redaction — I treat that as a known, documented leak, not a defence.
 
 Accepts hex, base64 and base64url from an external signer. **Can a crafted
 string be coerced into 64 bytes that are not the signature the KMS produced?**
+
+### 7. What a bundle is allowed to say about itself
+
+Two gaps in bundle verification were found by me *after* the first version of
+this brief, both while writing a second verifier for the website
+(`site/verify.js`) and running it against the first. Both are fixed; please
+check that the fixes cover the class and not just the instances.
+
+- **Completeness was taken on the sender's word.** A bundle with its last
+  entries removed and `partial` left false verified clean, as did one whose
+  `head` had been replaced — every remaining inclusion proof was genuine.
+  `verifyBundle` now requires a complete bundle to hold `treeSize` entries, its
+  root and head to match its own entries, and every checkpoint root to match the
+  same-size prefix of them.
+- **Witnesses were counted against the bundle's own keyring.** The keyring is
+  supplied by the party under suspicion, so an operator could invent any number
+  of witnesses by adding fresh keys. `--witnesses N` now requires
+  `trustedWitnesses` (kid → public key, from the witness operators), counts only
+  those, checks them against the pinned key rather than the bundle's, and refuses
+  the request outright if none are supplied.
+
+**The open question behind the second one:** a checkpoint signature's `role`
+(`log` or `witness`) is a label the signature does not cover. Pinning makes that
+harmless for witnesses, and a pinned key is refused as a log signature, but the
+`log` role itself is still just a claim. Should the role be inside the signed
+digest (a format v2), or is pinning the right and sufficient answer?
+
+Also worth knowing: `site/test/verify.test.js` runs the two independent
+verifiers over honest, tampered and randomly mutated bundles and requires the
+same verdict every time. That is how both gaps surfaced, and it is the cheapest
+way to keep finding them.
 
 ---
 

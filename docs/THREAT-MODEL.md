@@ -132,8 +132,16 @@ roots at the same size. An auditor who requires *k* witness signatures from
 witnesses **they** chose forces the operator to show everyone the same history.
 
 ```bash
-pw check evidence.json --witnesses 2
+pw check evidence.json --witnesses 2 --witness-keys witnesses.json
 ```
+
+`witnesses.json` holds the witnesses' public keys **as their operators
+published them** — never taken from the bundle. A bundle's own keyring comes
+from the party whose honesty is in question, so it cannot vouch for witnesses:
+an operator could add any number of fresh keys and "witness" their own
+checkpoints. Only signatures from keys you pinned are counted, and asking for
+`--witnesses` without pinning any is refused rather than answered by counting
+whatever the bundle contains.
 
 **Residual risk.** Witnesses are only as independent as the deployment makes
 them. Three witnesses running on infrastructure the operator controls provide

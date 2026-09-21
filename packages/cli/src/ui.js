@@ -137,7 +137,9 @@ export function parseArgs(argv) {
         if (next === undefined || next.startsWith('-')) {
           out[a.slice(2)] = true;
         } else {
-          out[a.slice(2)] = next;
+          const name = a.slice(2);
+          // Repeatable: a verifier may pin several witnesses.
+          out[name] = name === 'witness-key' && typeof out[name] === 'string' ? `${out[name]},${next}` : next;
           i++;
         }
       }

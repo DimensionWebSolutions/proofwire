@@ -471,7 +471,7 @@ export class ProofLog {
  * @param {number} [opts.minWitnesses=0]
  * @returns {{ ok: boolean, issues: string[], checked: number }}
  */
-export function verifyBundle(bundle, opts = {}) {
+function verifyBundleUnchecked(bundle, opts = {}) {
   /** @type {string[]} */
   const issues = [];
 
@@ -493,8 +493,27 @@ export function verifyBundle(bundle, opts = {}) {
     );
   }
 
+  // Witnesses are only evidence if the verifier chose them. A bundle's own
+  // keyring is supplied by the party under suspicion, so it cannot vouch for
+  // witnesses: asking for N without saying whose keys to trust is refused
+  // rather than answered by counting whatever the bundle happens to contain.
+  const minWitnesses = opts.minWitnesses ?? 0;
+  const trustedWitnesses =
+    opts.trustedWitnesses && typeof opts.trustedWitnesses === 'object'
+      ? opts.trustedWitnesses
+      : undefined;
+  if (minWitnesses > 0 && !trustedWitnesses) {
+    issues.push(
+      `${minWitnesses} witness signature(s) required, but no trusted witness keys were ` +
+        `supplied — a bundle's own keyring cannot vouch for its witnesses`,
+    );
+  }
+
   for (const cp of bundle.checkpoints ?? []) {
-    const res = verifyCheckpoint(cp, keyring, { minWitnesses: opts.minWitnesses ?? 0 });
+    const res = verifyCheckpoint(cp, keyring, {
+      minWitnesses: trustedWitnesses ? minWitnesses : 0,
+      trustedWitnesses,
+    });
     if (!res.ok) {
       issues.push(`checkpoint at size ${cp.body?.size}: ${res.issues.join('; ')}`);
     }
@@ -626,4 +645,32 @@ export function verifyBundle(bundle, opts = {}) {
   }
 
   return { ok: issues.length === 0, issues, checked };
+}
+
+/**
+ * Verify an evidence bundle standing alone. Never throws.
+ *
+ * A verifier is fed hostile data by definition, and an exception is the worst
+ * thing it can return: a caller can read "it crashed" as "it could not check,
+ * so carry on". Anything unexpected becomes a failed verification instead.
+ *
+ * @param {object} bundle
+ * @param {object} [opts]
+ * @param {string} [opts.expectRoot]  A root from a witness or a prior export.
+ * @param {number} [opts.minWitnesses=0]  Require this many valid witness
+ *   signatures on every checkpoint. Needs `trustedWitnesses`.
+ * @param {Record<string, string>} [opts.trustedWitnesses]  kid → public key
+ *   (base64url) of the witnesses you chose, obtained from outside the bundle.
+ * @returns {{ ok: boolean, issues: string[], checked: number }}
+ */
+export function verifyBundle(bundle, opts = {}) {
+  try {
+    return verifyBundleUnchecked(bundle, opts);
+  } catch (err) {
+    return {
+      ok: false,
+      issues: [`could not verify this bundle: ${/** @type {Error} */ (err).message}`],
+      checked: 0,
+    };
+  }
 }

@@ -4,6 +4,7 @@ import os from 'node:os';
 import { ProofLog, Policy, verifyBundle } from '@proofwire/core';
 import { RemoteSink, fetchPolicy } from '@proofwire/proxy/remote';
 import { c, out, ok, bad, warn, info, heading, kv, table } from './ui.js';
+import { witnessKeysFrom } from './witness-keys.js';
 
 /**
  * Commands that connect a local log to a Proofwire hub.
@@ -227,7 +228,10 @@ export async function cmdRemoteVerify(args) {
   heading(`Verifying ${slug} on ${remote.url}`);
 
   const bundle = await get(`/v1/logs/${encodeURIComponent(slug)}/bundle`);
-  const result = verifyBundle(bundle, { minWitnesses: Number(args.witnesses ?? 0) });
+  const result = verifyBundle(bundle, {
+    minWitnesses: Number(args.witnesses ?? 0),
+    trustedWitnesses: witnessKeysFrom(args),
+  });
 
   kv([
     ['entries', String(bundle.entries.length)],
@@ -423,8 +427,8 @@ export async function cmdCosign(args) {
     ['signatures', `${witnesses} witness${witnesses === 1 ? '' : 'es'} on this root`],
   ]);
   out('');
-  info('An auditor can now require this signature:');
-  out(`  ${c.cyan('pw check evidence.json --witnesses 1')}`);
+  info('An auditor can now require this signature, pinning the witness they trust:');
+  out(`  ${c.cyan(`pw check evidence.json --witnesses 1 --witness-key ${body.witness.kid}=${body.witness.publicKey}`)}`);
   out('');
   return 0;
 }

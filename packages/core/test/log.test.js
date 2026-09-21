@@ -320,11 +320,12 @@ test('a witness signature attached to a checkpoint survives export and verificat
   assert.equal(stored.sigs.filter((s) => s.role === 'witness').length, 1);
 
   const bundle = JSON.parse(JSON.stringify(reopened.bundle()));
-  const res = verifyBundle(bundle, { minWitnesses: 1 });
+  const pinned = { [witness.kid]: witness.publicKey };
+  const res = verifyBundle(bundle, { minWitnesses: 1, trustedWitnesses: pinned });
   assert.ok(res.ok, JSON.stringify(res.issues, null, 2));
 
   // And a policy demanding two witnesses must not be satisfied by one.
-  assert.equal(verifyBundle(bundle, { minWitnesses: 2 }).ok, false);
+  assert.equal(verifyBundle(bundle, { minWitnesses: 2, trustedWitnesses: pinned }).ok, false);
 });
 
 test('re-witnessing the same root replaces rather than duplicates', async () => {
@@ -478,4 +479,115 @@ test('an empty log exports a bundle that verifies, and a forged empty head does 
 
   bundle.head = 'ab'.repeat(32);
   assert.equal(verifyBundle(bundle).ok, false);
+});
+
+// ── witnesses have to be the verifier's, not the bundle's ────────────────
+
+/**
+ * A log with one checkpoint and one real, independent witness.
+ *
+ * @returns {{ log: ProofLog, cp: any, witness: any }}
+ */
+function witnessedLog() {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 6);
+  const cp = log.checkpoint();
+  const witness = generateIdentity().identity;
+  log.trustKey(witness.kid, witness.publicKey);
+  log.addSignature(cp.body.size, cosign(cp, witness).sigs.find((x) => x.kid === witness.kid));
+  return { log, cp, witness };
+}
+
+test('a bundle cannot vouch for its own witnesses', () => {
+  // The operator invents three witnesses by adding fresh keys to the bundle's
+  // keyring and signing their own checkpoint with each. Counting signatures
+  // against the bundle's keyring would call that "three independent
+  // witnesses".
+  const { log, cp } = witnessedLog();
+  const invented = Array.from({ length: 3 }, () => generateIdentity().identity);
+  for (const w of invented) {
+    log.trustKey(w.kid, w.publicKey);
+    log.addSignature(cp.body.size, cosign(cp, w).sigs.find((x) => x.kid === w.kid));
+  }
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+
+  // Asking for witnesses without saying whose keys to trust is refused, rather
+  // than answered by counting whatever the bundle happens to contain.
+  const unpinned = verifyBundle(bundle, { minWitnesses: 2 });
+  assert.equal(unpinned.ok, false);
+  assert.ok(unpinned.issues.some((m) => /no trusted witness keys were supplied/.test(m)));
+
+  // The verifier pins the one witness it actually chose. The invented ones are
+  // ignored, so two is not reachable.
+  const real = log.checkpoints()[0].sigs.find((x) => x.role === 'witness' && !invented.some((w) => w.kid === x.kid));
+  const pinnedReal = { [real.kid]: log.keyring[real.kid] };
+  assert.equal(verifyBundle(bundle, { minWitnesses: 1, trustedWitnesses: pinnedReal }).ok, true);
+  const two = verifyBundle(bundle, { minWitnesses: 2, trustedWitnesses: pinnedReal });
+  assert.equal(two.ok, false);
+  assert.ok(two.issues.some((m) => /only 1 valid witness signature/.test(m)));
+});
+
+test('a pinned witness is checked against the pinned key, never the bundle\'s', () => {
+  // The attacker signs with their own key but claims to be the real witness,
+  // and swaps the bundle's keyring entry for that kid to their own public key.
+  // Judged by the bundle's keyring the forgery verifies perfectly.
+  const { log, cp, witness } = witnessedLog();
+  const attacker = generateIdentity().identity;
+
+  const forged = cosign({ body: cp.body, sigs: [] }, attacker).sigs.find((x) => x.role === 'witness');
+  forged.kid = witness.kid;
+
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+  const target = bundle.checkpoints[0];
+  target.sigs = target.sigs.filter((x) => x.role !== 'witness');
+  target.sigs.push(forged);
+  bundle.keyring[witness.kid] = attacker.publicKey;
+
+  // Unpinned, nothing looks wrong. That is the whole problem.
+  assert.equal(verifyBundle(bundle).ok, true);
+
+  const res = verifyBundle(bundle, {
+    minWitnesses: 1,
+    trustedWitnesses: { [witness.kid]: witness.publicKey },
+  });
+  assert.equal(res.ok, false);
+  assert.ok(res.issues.some((m) => /invalid witness signature/.test(m)), JSON.stringify(res.issues));
+});
+
+test('a pinned witness relabelled as the log is not a log signature', () => {
+  const { log, witness } = witnessedLog();
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+
+  const cpj = bundle.checkpoints[0];
+  const w = cpj.sigs.find((x) => x.role === 'witness');
+  cpj.sigs = [{ ...w, role: 'log' }]; // the only signature left claims to be the log's
+
+  const res = verifyBundle(bundle, { trustedWitnesses: { [witness.kid]: witness.publicKey } });
+  assert.equal(res.ok, false);
+  assert.ok(res.issues.some((m) => /labelled as the log's/.test(m)), JSON.stringify(res.issues));
+  assert.ok(res.issues.some((m) => /no valid log signature/.test(m)));
+});
+
+test('witnesses the verifier was not told about are ignored rather than counted', () => {
+  const { log, cp, witness } = witnessedLog();
+  const stranger = generateIdentity().identity;
+  log.trustKey(stranger.kid, stranger.publicKey);
+  log.addSignature(cp.body.size, cosign(cp, stranger).sigs.find((x) => x.kid === stranger.kid));
+
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+  const pinned = { [witness.kid]: witness.publicKey };
+
+  assert.equal(verifyBundle(bundle, { minWitnesses: 1, trustedWitnesses: pinned }).ok, true);
+  assert.equal(verifyBundle(bundle, { minWitnesses: 2, trustedWitnesses: pinned }).ok, false);
+});
+
+test('pinning nothing at all is not the same as not pinning', () => {
+  // An empty set of trusted witnesses means "I trust no one", so a policy
+  // demanding one can never be met — it must not fall back to the bundle.
+  const { log } = witnessedLog();
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+  const res = verifyBundle(bundle, { minWitnesses: 1, trustedWitnesses: {} });
+  assert.equal(res.ok, false);
+  assert.ok(res.issues.some((m) => /only 0 valid witness signature/.test(m)));
 });
