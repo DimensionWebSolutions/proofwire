@@ -1,0 +1,85 @@
+name: Pages
+
+# The site is static files in site/. It is deployed by Actions rather than from
+# a branch, so there is no gh-pages branch to drift out of sync, and what is
+# live is always a commit on main that passed the site's own tests — including
+# the differential test that holds the browser verifier to the core one.
+on:
+  push:
+    branches: [main]
+    paths: ['site/**', '.github/workflows/pages.yml']
+  # release.json is written at deploy time, so publishing to npm should refresh
+  # it: the install line appears by itself once the packages exist.
+  workflow_run:
+    workflows: [Release]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    # A failed release must not redeploy on its way past.
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      # The verifier test imports @proofwire/core through the workspace link.
+      - run: npm install --no-audit --no-fund
+
+      - name: Test the site
+        run: node --no-warnings=ExperimentalWarning --test 'site/test/*.test.js'
+
+      - name: Record whether the packages are on npm
+        # This is what makes the install line appear. The CLI's name is
+        # unscoped, so if someone else registered it first the registry would
+        # happily return their version — and this page would send visitors to
+        # their code. A version only counts if the package points back here.
+        run: |
+          repo="$(npm view proofwire repository.url 2>/dev/null || true)"
+          ver="$(npm view proofwire version 2>/dev/null || true)"
+          if [[ "$repo" == *"github.com/${GITHUB_REPOSITORY}"* && "$ver" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            printf '{ "npm": "%s" }\n' "$ver" > site/release.json
+          else
+            printf '{ "npm": null }\n' > site/release.json
+            if [ -n "$ver" ]; then
+              echo "::warning::'proofwire' is on npm (version '$ver', repository '$repo') but that is not a release of this repository. Not advertising it."
+            fi
+          fi
+          cat site/release.json
+
+      - name: Stage the published files
+        # The tests are for CI; there is no reason to serve them.
+        run: |
+          mkdir _site
+          cp -r site/. _site/
+          rm -rf _site/test
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

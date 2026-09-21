@@ -1,0 +1,35 @@
+/* Self-hosted so the site makes no third-party requests: a page that says
+   "nothing leaves your browser" should not tell Google who visited it.
+   Latin subset only; licences are alongside. */
+
+@font-face {
+  font-family: "Archivo";
+  font-style: normal;
+  font-weight: 600 800;
+  font-display: swap;
+  src: url("archivo.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "JetBrains Mono";
+  font-style: normal;
+  font-weight: 400 700;
+  font-display: swap;
+  src: url("jetbrains-mono.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: normal;
+  font-weight: 400 600;
+  font-display: swap;
+  src: url("source-serif-4.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "Source Serif 4";
+  font-style: italic;
+  font-weight: 400;
+  font-display: swap;
+  src: url("source-serif-4-italic.woff2") format("woff2");
+}
