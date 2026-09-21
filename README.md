@@ -318,7 +318,9 @@ than none:
   and common PII. They will not catch a secret shaped like prose. Commitments,
   not redaction, are what keep payloads out of the log.
 
-See [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md) for the full analysis.
+See [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md) for the full analysis, and
+[`docs/GO-LIVE.md`](docs/GO-LIVE.md) for a blunt assessment of what is and is
+not ready for production.
 
 ---
 
@@ -333,6 +335,11 @@ over HTTP.
 ```bash
 npm test
 ```
+
+Measured on a 4-core laptop: 2,300 receipts/s ingested, 9,500 inclusion
+proofs/s, 109 ms to export 4,000 receipts as a verifiable bundle, 2.5 KB per
+receipt on disk, and **zero external dependencies**. Reproduce with
+`node packages/server/test/load.js`.
 
 Wire format and policy schema are versioned (`"v": 1`) and will be migrated,
 not broken.

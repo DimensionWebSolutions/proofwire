@@ -260,3 +260,58 @@ test('a second-preimage splice is blocked by domain separation', () => {
   // as an entry: leafHash(x) === interior has no known solution.
   assert.notDeepEqual(leafHash(interior), interior);
 });
+
+test('the cached-level proof is byte-identical to the recursive one, for every tree size to 128', () => {
+  // The fast path exists only for speed. If it ever disagrees with the
+  // reference implementation above — which is exhaustively verified against
+  // RFC 6962 — it is wrong, however fast it is.
+  for (let n = 1; n <= 128; n++) {
+    const l = leaves(n);
+    const tree = new MerkleTree(l);
+    assert.deepEqual(tree.root, merkleRoot(l), `root diverged at n=${n}`);
+
+    for (let i = 0; i < n; i++) {
+      assert.deepEqual(
+        tree.inclusionProof(i),
+        inclusionProof(l, i),
+        `cached proof diverged from the reference at n=${n}, leaf=${i}`,
+      );
+    }
+  }
+});
+
+test('cached proofs stay correct as the tree grows under them', () => {
+  const tree = new MerkleTree();
+  const all = leaves(70);
+
+  for (let n = 1; n <= all.length; n++) {
+    tree.append(all[n - 1]);
+    // Ask for a proof at every size, so the cache is built and then
+    // invalidated repeatedly — the exact pattern an ingesting hub produces.
+    const i = (n * 7) % n;
+    assert.ok(
+      verifyInclusion({
+        leafHash: all[i],
+        index: i,
+        treeSize: n,
+        proof: tree.inclusionProof(i),
+        root: tree.root,
+      }),
+      `a cached proof went stale after appending leaf ${n - 1}`,
+    );
+  }
+});
+
+test('generating every proof for a large tree is not quadratic', () => {
+  // 41 seconds for 4,000 receipts was the bug this guards. The absolute
+  // threshold is loose on purpose — the point is the shape of the curve, and
+  // a regression to O(n²) would blow past it by orders of magnitude.
+  const n = 4000;
+  const tree = new MerkleTree(leaves(n));
+
+  const started = Date.now();
+  for (let i = 0; i < n; i++) tree.inclusionProof(i);
+  const ms = Date.now() - started;
+
+  assert.ok(ms < 5000, `generating ${n} proofs took ${ms}ms — this has gone quadratic again`);
+});

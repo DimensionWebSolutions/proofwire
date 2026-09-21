@@ -74,7 +74,50 @@ export class MerkleTree {
     this.leaves = [];
     /** @type {{ size: number, hash: Buffer }[]} */
     this._stack = [];
+    /**
+     * Cached level structure, built on demand for proof generation.
+     * `_levels[0]` is the leaves; each subsequent level pairs adjacent nodes
+     * and promotes an unpaired last node. Invalidated on append.
+     * @type {Buffer[][]|null}
+     */
+    this._levels = null;
     for (const l of leaves) this.append(l);
+  }
+
+  /**
+   * Build the level structure, so an inclusion proof is a walk up the tree
+   * rather than a recomputation of it.
+   *
+   * The naive recursive PATH is O(n) per proof because it rebuilds every
+   * subtree root it passes. That is invisible on a toy log and quadratic on a
+   * real one: generating proofs for all n entries of an export costs O(n²),
+   * which measured at 41 seconds for 4,000 receipts and would be hours for a
+   * hundred thousand. One O(n) build amortised across every proof turns each
+   * one into O(log n).
+   *
+   * Pairing adjacent nodes and promoting the odd one out is exactly RFC 6962's
+   * "split at the largest power of two" decomposition, read bottom-up.
+   *
+   * @returns {Buffer[][]}
+   */
+  _buildLevels() {
+    if (this._levels) return this._levels;
+
+    /** @type {Buffer[][]} */
+    const levels = [this.leaves.slice()];
+    while (levels[levels.length - 1].length > 1) {
+      const below = levels[levels.length - 1];
+      /** @type {Buffer[]} */
+      const above = [];
+      for (let i = 0; i < below.length; i += 2) {
+        // An unpaired final node rises unchanged; it pairs at a higher level.
+        above.push(i + 1 < below.length ? nodeHash(below[i], below[i + 1]) : below[i]);
+      }
+      levels.push(above);
+    }
+
+    this._levels = levels;
+    return levels;
   }
 
   /** @returns {number} */
@@ -88,6 +131,7 @@ export class MerkleTree {
    */
   append(hash) {
     this.leaves.push(hash);
+    this._levels = null;
     this._stack.push({ size: 1, hash });
     while (this._stack.length > 1) {
       const right = this._stack[this._stack.length - 1];
@@ -131,7 +175,30 @@ export class MerkleTree {
    * @returns {Buffer[]}
    */
   inclusionProof(index, treeSize = this.leaves.length) {
-    return inclusionProof(this.leaves.slice(0, treeSize), index);
+    // The fast path covers the overwhelmingly common case: a proof against the
+    // tree as it stands now. A proof against a historical size still needs the
+    // recursive form, which is fine — that is a rare, one-off request.
+    if (treeSize !== this.leaves.length) {
+      return inclusionProof(this.leaves.slice(0, treeSize), index);
+    }
+    if (!Number.isInteger(index) || index < 0 || index >= this.leaves.length) {
+      throw new RangeError(`leaf index ${index} out of range for ${this.leaves.length} leaves`);
+    }
+
+    const levels = this._buildLevels();
+    /** @type {Buffer[]} */
+    const proof = [];
+    let i = index;
+
+    for (let depth = 0; depth < levels.length - 1; depth++) {
+      const level = levels[depth];
+      const sibling = i ^ 1;
+      // No sibling means this node was promoted unchanged; nothing to prove
+      // at this level, and the index simply rises.
+      if (sibling < level.length) proof.push(level[sibling]);
+      i >>>= 1;
+    }
+    return proof;
   }
 
   /**

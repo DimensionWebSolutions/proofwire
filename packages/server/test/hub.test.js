@@ -780,3 +780,74 @@ test('rate limiting kicks in and says when to retry', async () => {
   assert.ok(codes.includes(429), `expected a 429, got ${codes.join(',')}`);
   await limited.close();
 });
+
+// ── cross-site request forgery ───────────────────────────────────────────
+
+test('a cookie-authenticated write from another origin is refused', async () => {
+  const auth = new Auth(hub.store);
+  const user = auth.createUser({ email: 'csrf@acme.test', password: 'a-long-enough-password' });
+  auth.addMember(acme.org, user.id, 'owner');
+
+  const login = await fetch(base + '/login', {
+    method: 'POST',
+    headers: { 'content-type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({ email: 'csrf@acme.test', password: 'a-long-enough-password' }),
+    redirect: 'manual',
+  });
+  const cookie = (login.headers.getSetCookie?.() ?? []).map((c) => c.split(';')[0]).join('; ');
+  assert.match(cookie, /pw_session=/);
+
+  const host = new URL(base).host;
+
+  // Same-origin: allowed.
+  const ok = await fetch(base + '/v1/keys', {
+    method: 'POST',
+    headers: { cookie, origin: `http://${host}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'same-origin', scopes: ['logs:read'] }),
+  });
+  assert.equal(ok.status, 200);
+
+  // Another origin, with the victim's cookie attached: refused.
+  const forged = await fetch(base + '/v1/keys', {
+    method: 'POST',
+    headers: { cookie, origin: 'https://evil.example', 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'forged', scopes: ['admin'] }),
+  });
+  assert.equal(forged.status, 403);
+  assert.equal((await forged.json()).error.code, 'cross_origin');
+
+  // No Origin and no Referer at all: also refused, rather than assumed safe.
+  const bare = await fetch(base + '/v1/keys', {
+    method: 'POST',
+    headers: { cookie, 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'bare', scopes: ['admin'] }),
+  });
+  assert.equal(bare.status, 403);
+
+  // And no key was minted by either attempt.
+  const keys = hub.auth.keys(acme.org);
+  assert.ok(!keys.some((k) => k.name === 'forged' || k.name === 'bare'));
+});
+
+test('bearer-token writes are unaffected: no browser attaches those cross-site', async () => {
+  const res = await fetch(base + '/v1/keys', {
+    method: 'POST',
+    headers: {
+      authorization: `Bearer ${acme.key}`,
+      origin: 'https://evil.example',
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ name: 'api-client', scopes: ['logs:read'] }),
+  });
+  assert.equal(res.status, 200, 'machine clients must not be broken by a browser control');
+});
+
+test('HSTS is sent unless cookies are explicitly insecure', async () => {
+  const res = await api('GET', '/health');
+  const hsts = res.headers.get('strict-transport-security');
+  if (process.env.PROOFWIRE_INSECURE_COOKIES === '1') {
+    assert.equal(hsts, null, 'a local HTTP hub must not pin the browser to HTTPS');
+  } else {
+    assert.match(hsts ?? '', /max-age=31536000/);
+  }
+});

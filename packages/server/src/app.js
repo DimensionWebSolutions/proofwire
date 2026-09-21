@@ -887,6 +887,32 @@ export class Hub {
     });
   }
 
+  /**
+   * Whether a state-changing request originated from this hub's own pages.
+   *
+   * `Origin` is set by the browser on every POST and cannot be forged by page
+   * script. `Referer` is the fallback for the handful of cases that omit
+   * Origin. A request carrying neither is refused rather than trusted: for a
+   * cookie-authenticated write, absence of evidence is not evidence of
+   * innocence.
+   *
+   * @param {import('node:http').IncomingMessage} req
+   * @returns {boolean}
+   */
+  _sameOrigin(req) {
+    const host = req.headers.host;
+    if (!host) return false;
+
+    const stated = req.headers.origin ?? req.headers.referer;
+    if (typeof stated !== 'string' || stated === '') return false;
+
+    try {
+      return new URL(stated).host === host;
+    } catch {
+      return false;
+    }
+  }
+
   // ── request pipeline ──────────────────────────────────────────────────
 
   /**
@@ -898,6 +924,11 @@ export class Hub {
     res.setHeader('x-request-id', requestId);
     res.setHeader('x-content-type-options', 'nosniff');
     res.setHeader('referrer-policy', 'no-referrer');
+    // Suppressed alongside Secure cookies, because a local HTTP development
+    // hub that pins the browser to HTTPS for a year is a foot-gun.
+    if (process.env.PROOFWIRE_INSECURE_COOKIES !== '1') {
+      res.setHeader('strict-transport-security', 'max-age=31536000; includeSubDomains');
+    }
 
     const url = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
     const started = Date.now();
@@ -910,6 +941,26 @@ export class Hub {
       }
 
       const principal = this._principal(req, url);
+
+      // Cross-site request forgery.
+      //
+      // Only cookie-authenticated requests are exposed: a browser will never
+      // attach an Authorization header to a cross-site request, so the API is
+      // structurally immune and the console is not. SameSite=Lax already
+      // withholds the cookie on a cross-site POST in current browsers, but
+      // that is one mechanism in one layer, and "the browser will protect us"
+      // is not a control an auditor can inspect. An explicit origin check is.
+      if (
+        principal?.kind === 'user' &&
+        !['GET', 'HEAD', 'OPTIONS'].includes(req.method ?? 'GET') &&
+        !this._sameOrigin(req)
+      ) {
+        throw new StoreError(
+          403,
+          'cross_origin',
+          'this request did not come from the console; state-changing requests must be same-origin',
+        );
+      }
 
       // Rate limit by credential where we have one, by address otherwise. A
       // per-address limit alone would throttle every agent behind one NAT
