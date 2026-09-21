@@ -41,6 +41,9 @@ const CYAN = (s) => `[36m${s}[0m`;
 
 const dryRun = process.argv.includes('--dry-run');
 const skipTests = process.argv.includes('--skip-tests');
+// With 2FA on (it should be), npm wants a one-time code per publish. Either pass
+// one here, or leave it out and npm prompts, which needs the terminal attached.
+const otp = process.argv.find((a) => a.startsWith('--otp='))?.slice('--otp='.length);
 
 /**
  * Run a command, coping with Windows' `.cmd` shims.
@@ -123,7 +126,7 @@ function preflight() {
       blocking.push(
         'Create the free org at https://www.npmjs.com/org/create (name: proof_wire).\n' +
           '     Without it, the four @proof_wire/* packages cannot be published.\n' +
-          '     The unscoped `proofwire` CLI would still publish.',
+          '     The unscoped `proofwire` CLI depends on two of them, so it would be uninstallable.',
       );
     }
   }
@@ -199,7 +202,9 @@ async function main() {
     }
 
     try {
-      run('npm', ['publish', '--workspace', `./${rel}`, '--access', 'public'], { inherit: false });
+      // Attached to the terminal, not piped: a piped npm cannot ask for a 2FA code and
+      // fails with EOTP, which is how the first attempt at this went.
+      run('npm', ['publish', '--workspace', `./${rel}`, '--access', 'public', ...(otp ? [`--otp=${otp}`] : [])], { inherit: true });
       console.log(`  ${GREEN('✓')} ${name.padEnd(24)} ${version}`);
     } catch (err) {
       console.log(`  ${RED('✗')} ${name.padEnd(24)} ${String(err.stderr ?? err.message).trim().split('\n').slice(-2).join(' ')}`);
