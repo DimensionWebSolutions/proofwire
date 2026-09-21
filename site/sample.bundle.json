@@ -1,0 +1,695 @@
+{
+  "v": 1,
+  "kind": "proofwire.bundle",
+  "log": "lg_417dbf994390192d",
+  "exported": "2026-09-21T22:15:24.701Z",
+  "treeSize": 11,
+  "root": "9115f020751f30659ed396c761c2cdf7bd40df5ac5b7e76b46a0b3e59861106c",
+  "head": "6718b6889e612714b4cc33d595588d5352fbf89a494c7160b86fb3cbfbe01049",
+  "keyring": {
+    "pw191b2389e7ee899ff4b61adcb9330f78a": "lZlpjJ30cnnl15qjFb1Pu72c0SipesALeh7uX7scnj4",
+    "pw151ff08c70bbc24fde47920d38c7c9066": "Otx3cPD94oUDTFFfEEj5mw3xl1akz0HMD0KcxmbFSAA",
+    "pw1152d59fdb2bd87d7154a3cf1113adde7": "72LXWXG20lCRJCoMBK02blQYxsOyymLz9jHCaXPxwlc"
+  },
+  "checkpoints": [
+    {
+      "body": {
+        "head": "d24f3e624112a3f7eedef298caa48ec9697990a5aafb89e74803c1e3c53c38b5",
+        "log": "lg_417dbf994390192d",
+        "root": "bd33dbf1afcf68c7586eb1af4b8cd69d3694753c8fa3a52c2b806983c1da60ed",
+        "size": 6,
+        "ts": "2026-09-21T22:15:24.666Z",
+        "v": 1
+      },
+      "sigs": [
+        {
+          "kid": "pw191b2389e7ee899ff4b61adcb9330f78a",
+          "role": "log",
+          "sig": "joBJ-wAUdwBpo4wt3XmCHQ77UrfRgFu6_HvHYQRwkcHfIt8B9OeOF9L-CXBfwqpfn9AUwGAS74q60szzBqdfDA"
+        },
+        {
+          "kid": "pw151ff08c70bbc24fde47920d38c7c9066",
+          "role": "witness",
+          "sig": "ZIMH5kVH_htTayuNToAx60y4S5sD-X_yl3aUzyB_TbJre5nKCOeKYge5f90KjoUakI-Z8hI5RwSMj6AczYcEDQ",
+          "ts": "2026-09-21T22:15:24.695Z"
+        }
+      ]
+    },
+    {
+      "body": {
+        "head": "6718b6889e612714b4cc33d595588d5352fbf89a494c7160b86fb3cbfbe01049",
+        "log": "lg_417dbf994390192d",
+        "root": "9115f020751f30659ed396c761c2cdf7bd40df5ac5b7e76b46a0b3e59861106c",
+        "size": 11,
+        "ts": "2026-09-21T22:15:24.692Z",
+        "v": 1
+      },
+      "sigs": [
+        {
+          "kid": "pw191b2389e7ee899ff4b61adcb9330f78a",
+          "role": "log",
+          "sig": "bNmHL4kd7cpVPFXgurn4cJ-JRGVtMrM5ZzloygacYj1G7UGHgRp4GcPnm3uu-cQDCw8KBsLCSCCFvswQUCR1BA"
+        },
+        {
+          "kid": "pw151ff08c70bbc24fde47920d38c7c9066",
+          "role": "witness",
+          "sig": "c96yRWvuwAaFfWGMqh_Jc70fFccaGUYxl8uZ9l30_5r0iPycqP2ckDthFGW2ZJ1nY0qstLbatKtQa5iKNLkYCQ",
+          "ts": "2026-09-21T22:15:24.697Z"
+        },
+        {
+          "kid": "pw1152d59fdb2bd87d7154a3cf1113adde7",
+          "role": "witness",
+          "sig": "jY50qesig0ZNEgjN-icBLOrAfOnzcyfHY6tasJ1TckxgVlU_wvOPaOQCJL9xzTyAGEjUf_7wjtf336npQsZfDQ",
+          "ts": "2026-09-21T22:15:24.699Z"
+        }
+      ]
+    }
+  ],
+  "partial": false,
+  "entries": [
+    {
+      "receipt": {
+        "v": 1,
+        "log": "lg_417dbf994390192d",
+        "seq": 0,
+        "prev": "0000000000000000000000000000000000000000000000000000000000000000",
+        "ts": "2026-09-21T22:15:24.582Z",
+        "phase": "intent",
+        "actor": {
+          "agent": "claude-opus-5",
+          "session": "sess_sample",
+          "principal": "ops@acme.test",
+          "runtime": "proofwire-proxy/0.2.0"
+        },
+        "action": {
+          "kind": "tool_call",
+          "target": "ops.query",
+          "metrics": {},
+          "params": {
+            "hash": "a73ac16e2a15d66326717a5f2aa94da0153b48adf09eebe9a780d858e09b96c1",
+            "size": 55,
+            "preview": {
+              "sql": "SELECT count(*) FROM orders WHERE status = $1"
+            }
+          }
+        },
+        "decision": {
+          "outcome": "allow",
+          "rules": [],
+          "reason": "no rule matched; policy default is allow",
+          "policy": "775cd8af65effe38ef378d261100b416136eca9d9401fed1289b74ee34443e57"
+        },
+        "result": null,
+        "attest": {
+          "alg": "ed25519",
+          "kid": "pw191b2389e7ee899ff4b61adcb9330f78a",
+          "sig": "on6KdtA4U7TGJV6MhJN8qlPVpBwkzI6wKW4BlJo2-iiV-nJxf5ZYrU0TvLL1ln-uzFGf5Ksu5QlnSJ5UEi_4Dg"
+        }
+      },
+      "proof": [
+        "3e244f0fa93af988646322836927cff456bcb7936111548ada262d934dfb49f0",
+        "a3a1cb81ba1eb0595c57016a15b41ad3b7863e7d86e5d9cc7edcfb7b2d08eac3",
+        "4c767009591f07dbf7949d3da920e332529155949c727ca0c0f91d71dad48e91",
+        "61d6e203210c44456b06fd4b8cf9dc1df1efb0771c16b4fa4992cfc902aebb9c"
+      ]
+    },
+    {
+      "receipt": {
+        "v": 1,
+        "log": "lg_417dbf994390192d",
+        "seq": 1,
+        "prev": "75e475979e8ee34f1a629d609f4d39a059a3be92723825efa750eeed111c3bfe",
+        "ts": "2026-09-21T22:15:24.627Z",
+        "phase": "outcome",
+        "actor": {
+          "agent": "claude-opus-5",
+          "session": "sess_sample",
+          "principal": "ops@acme.test",
+          "runtime": "proofwire-proxy/0.2.0"
+        },
+        "action": {
+          "kind": "tool_call",
+          "target": "ops.query",
+          "params": {
+            "hash": "926b656814ed2662cb74af547e1b2fc83ff13c3e70797bd59e7954049a5387f8",
+            "size": 55,
+            "preview": {
+              "sql": "SELECT count(*) FROM orders WHERE status = $1"
+            }
+          }
+        },
+        "decision": {
+          "outcome": "allow",
+          "rules": [],
+          "reason": "no rule matched; policy default is allow",
+          "policy": "775cd8af65effe38ef378d261100b416136eca9d9401fed1289b74ee34443e57"
+        },
+        "result": {
+          "status": "ok",
+          "latencyMs": 40,
+          "payload": {
+            "hash": "a9d92ad9073ace2d9a3ee1d1a16574789a703e09303f4fced1d5ac35be03932e",
+            "size": 67,
+            "preview": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "{\"rows\":[{\"count\":128}]}"
+                }
+              ]
+            }
+          }
+        },
+        "ref": "75e475979e8ee34f1a629d609f4d39a059a3be92723825efa750eeed111c3bfe",
+        "attest": {
+          "alg": "ed25519",
+          "kid": "pw191b2389e7ee899ff4b61adcb9330f78a",
+          "sig": "YW3iTAp1Z3AGOgJ6oFm3qhFzaD7emLuz7V9xCX2ojVk6PZL_BNMl9TmtbptG_FVcgtL5UbHmwFnopRJ3K5ZoDA"
+        }
+      },
+      "proof": [
+        "75e475979e8ee34f1a629d609f4d39a059a3be92723825efa750eeed111c3bfe",
+        "a3a1cb81ba1eb0595c57016a15b41ad3b7863e7d86e5d9cc7edcfb7b2d08eac3",
+        "4c767009591f07dbf7949d3da920e332529155949c727ca0c0f91d71dad48e91",
+        "61d6e203210c44456b06fd4b8cf9dc1df1efb0771c16b4fa4992cfc902aebb9c"
+      ]
+    },
+    {
+      "receipt": {
+        "v": 1,
+        "log": "lg_417dbf994390192d",
+        "seq": 2,
+        "prev": "3e244f0fa93af988646322836927cff456bcb7936111548ada262d934dfb49f0",
+        "ts": "2026-09-21T22:15:24.629Z",
+        "phase": "intent",
+        "actor": {
+          "agent": "claude-opus-5",
+          "session": "sess_sample",
+          "principal": "ops@acme.test",
+          "runtime": "proofwire-proxy/0.2.0"
+        },
+        "action": {
+          "kind": "tool_call",
+          "target": "ops.refund",
+          "metrics": {
+            "amount_usd": 45
+          },
+          "params": {
+            "hash": "ec4da108fb713dab62ccbfb5a90217e5b86392e15e565a89f8079d306f229318",
+            "size": 34,
+            "preview": {
+              "order": "ord_8821",
+              "amount": 4500
+            }
+          }
+        },
+        "decision": {
+          "outcome": "allow",
+          "rules": [],
+          "reason": "no rule matched; policy default is allow",
+          "policy": "775cd8af65effe38ef378d261100b416136eca9d9401fed1289b74ee34443e57"
+        },
+        "result": null,
+        "attest": {
+          "alg": "ed25519",
+          "kid": "pw191b2389e7ee899ff4b61adcb9330f78a",
+          "sig": "vD6nxvHksFFa8CrQgcIvrwjPUbNBDs5m_zr4VW8DcloGsSg6NtkOMmkjZlInFcOu6mZnxxIt_gxEnDfRMiO7Ag"
+        }
+      },
+      "proof": [
+        "5d4bed4c742a4945ed04c711179af9594312ff31a47555587df08e2ee94294f5",
+        "818c486d4302dc28db2d2ad3f4c88383f9db7925afedeeb1efdbe85757dd941d",
+        "4c767009591f07dbf7949d3da920e332529155949c727ca0c0f91d71dad48e91",
+        "61d6e203210c44456b06fd4b8cf9dc1df1efb0771c16b4fa4992cfc902aebb9c"
+      ]
+    },
+    {
+      "receipt": {
+        "v": 1,
+        "log": "lg_417dbf994390192d",
+        "seq": 3,
+        "prev": "0850761a993b87e25a1a16dd78052f1f62b0002cf4408fe98a5fc270ac2079f5",
+        "ts": "2026-09-21T22:15:24.632Z",
+        "phase": "outcome",
+        "actor": {
+          "agent": "claude-opus-5",
+          "session": "sess_sample",
+          "principal": "ops@acme.test",
+          "runtime": "proofwire-proxy/0.2.0"
+        },
+        "action": {
+          "kind": "tool_call",
+          "target": "ops.refund",
+          "params": {
+            "hash": "9dfbd57f0b8fefbb75d98ff0186df38c65f27b7d2eac1d88c9587c2411c034ea",
+            "size": 34,
+            "preview": {
+              "order": "ord_8821",
+              "amount": 4500
+            }
+          }
+        },
+        "decision": {
+          "outcome": "allow",
+          "rules": [],
+          "reason": "no rule matched; policy default is allow",
+          "policy": "775cd8af65effe38ef378d261100b416136eca9d9401fed1289b74ee34443e57"
+        },
+        "result": {
+          "status": "ok",
+          "latencyMs": 1,
+          "payload": {
+            "hash": "10d7885b07822e17f5a456f315b21bb8ca1259ad5ecd846f79826b67473c9089",
+            "size": 86,
+            "preview": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Refunded 4500 cents on ord_8821. id=re_ku2s7lz9"
+                }
+              ]
+            }
+          }
+        },
+        "ref": "0850761a993b87e25a1a16dd78052f1f62b0002cf4408fe98a5fc270ac2079f5",
+        "attest": {
+          "alg": "ed25519",
+          "kid": "pw191b2389e7ee899ff4b61adcb9330f78a",
+          "sig": "3uYtNgam_j80Ty_j8fRMJqmZjquXnRBqUq5Mfaeu2XLJgCojQCpA6PUR7zcOsXeEIS-WwjYtCXc8NRv0JY14Bw"
+        }
+      },
+      "proof": [
+        "0850761a993b87e25a1a16dd78052f1f62b0002cf4408fe98a5fc270ac2079f5",
+        "818c486d4302dc28db2d2ad3f4c88383f9db7925afedeeb1efdbe85757dd941d",
+        "4c767009591f07dbf7949d3da920e332529155949c727ca0c0f91d71dad48e91",
+        "61d6e203210c44456b06fd4b8cf9dc1df1efb0771c16b4fa4992cfc902aebb9c"
+      ]
+    },
+    {
+      "receipt": {
+        "v": 1,
+        "log": "lg_417dbf994390192d",
+        "seq": 4,
+        "prev": "5d4bed4c742a4945ed04c711179af9594312ff31a47555587df08e2ee94294f5",
+        "ts": "2026-09-21T22:15:24.646Z",
+        "phase": "intent",
+        "actor": {
+          "agent": "claude-opus-5",
+          "session": "sess_sample",
+          "principal": "ops@acme.test",
+          "runtime": "proofwire-proxy/0.2.0"
+        },
+        "action": {
+          "kind": "tool_call",
+          "target": "ops.refund",
+          "metrics": {
+            "amount_usd": 30
+          },
+          "params": {
+            "hash": "b04c98dce38ec64ee6ab5581ded0f014ecc83d5c326f1c09c99feff32db49d0c",
+            "size": 34,
+            "preview": {
+              "order": "ord_8822",
+              "amount": 3000
+            }
+          }
+        },
+        "decision": {
+          "outcome": "allow",
+          "rules": [],
+          "reason": "no rule matched; policy default is allow",
+          "policy": "775cd8af65effe38ef378d261100b416136eca9d9401fed1289b74ee34443e57"
+        },
+        "result": null,
+        "attest": {
+          "alg": "ed25519",
+          "kid": "pw191b2389e7ee899ff4b61adcb9330f78a",
+          "sig": "QPaR3KiEBzr2ixpDWisVIgr0QoaqtGX0TBj4roQmFjf-uAIgWBMr8EgwZ0OdrcERGA9R7MKXEiOLtvolEhtaAQ"
+        }
+      },
+      "proof": [
+        "d24f3e624112a3f7eedef298caa48ec9697990a5aafb89e74803c1e3c53c38b5",
+        "5e54d65b816b0cfba42861aaa874095154207dc784172f82ca3d4b5dbad3076d",
+        "45f3313310592e95fd14dd00be9c2f512c7a4205582cecb60347c010c1efe9ec",
+        "61d6e203210c44456b06fd4b8cf9dc1df1efb0771c16b4fa4992cfc902aebb9c"
+      ]
+    },
+    {
+      "receipt": {
+        "v": 1,
+        "log": "lg_417dbf994390192d",
+        "seq": 5,
+        "prev": "49e4558e4c3059c4d6476dc6cd7434fa8f3749e0da6324513f2d04dec2f87120",
+        "ts": "2026-09-21T22:15:24.648Z",
+        "phase": "outcome",
+        "actor": {
+          "agent": "claude-opus-5",
+          "session": "sess_sample",
+          "principal": "ops@acme.test",
+          "runtime": "proofwire-proxy/0.2.0"
+        },
+        "action": {
+          "kind": "tool_call",
+          "target": "ops.refund",
+          "params": {
+            "hash": "b485524faa3ade8ff5556af2ef943d6dfe3d372401d437066ae65974d6a01d23",
+            "size": 34,
+            "preview": {
+              "order": "ord_8822",
+              "amount": 3000
+            }
+          }
+        },
+        "decision": {
+          "outcome": "allow",
+          "rules": [],
+          "reason": "no rule matched; policy default is allow",
+          "policy": "775cd8af65effe38ef378d261100b416136eca9d9401fed1289b74ee34443e57"
+        },
+        "result": {
+          "status": "ok",
+          "latencyMs": 1,
+          "payload": {
+            "hash": "86ce42815ce1c3897db396f2866f9aaa8e18a646e52a8d155368dcc318978653",
+            "size": 86,
+            "preview": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Refunded 3000 cents on ord_8822. id=re_cg9bcu6d"
+                }
+              ]
+            }
+          }
+        },
+        "ref": "49e4558e4c3059c4d6476dc6cd7434fa8f3749e0da6324513f2d04dec2f87120",
+        "attest": {
+          "alg": "ed25519",
+          "kid": "pw191b2389e7ee899ff4b61adcb9330f78a",
+          "sig": "DwdN4U-5I3lMQpkOk9DQOJYb8G6qdumdPRvg2OK-ObPNNOjoztF1DXhgDjxyT_bphsI31uG3YxP7UgwRFApqBw"
+        }
+      },
+      "proof": [
+        "49e4558e4c3059c4d6476dc6cd7434fa8f3749e0da6324513f2d04dec2f87120",
+        "5e54d65b816b0cfba42861aaa874095154207dc784172f82ca3d4b5dbad3076d",
+        "45f3313310592e95fd14dd00be9c2f512c7a4205582cecb60347c010c1efe9ec",
+        "61d6e203210c44456b06fd4b8cf9dc1df1efb0771c16b4fa4992cfc902aebb9c"
+      ]
+    },
+    {
+      "receipt": {
+        "v": 1,
+        "log": "lg_417dbf994390192d",
+        "seq": 6,
+        "prev": "d24f3e624112a3f7eedef298caa48ec9697990a5aafb89e74803c1e3c53c38b5",
+        "ts": "2026-09-21T22:15:24.668Z",
+        "phase": "atomic",
+        "actor": {
+          "agent": "claude-opus-5",
+          "session": "sess_sample",
+          "principal": "ops@acme.test",
+          "runtime": "proofwire-proxy/0.2.0"
+        },
+        "action": {
+          "kind": "tool_call",
+          "target": "ops.refund",
+          "metrics": {
+            "amount_usd": 90
+          },
+          "params": {
+            "hash": "ced77db86cd848d4eb3cab11b5310cb6bf2abd9e19810745aa953209a4e041f5",
+            "size": 34,
+            "preview": {
+              "order": "ord_8823",
+              "amount": 9000
+            }
+          }
+        },
+        "decision": {
+          "outcome": "deny",
+          "rules": [
+            "refunds.daily"
+          ],
+          "reason": "budget refunds.daily would be exceeded: 75 already committed plus 90 proposed, against a cap of 100 per 24h",
+          "policy": "775cd8af65effe38ef378d261100b416136eca9d9401fed1289b74ee34443e57",
+          "meta": {
+            "spent": 75,
+            "proposed": 90,
+            "limit": 100,
+            "window": "24h"
+          }
+        },
+        "result": null,
+        "attest": {
+          "alg": "ed25519",
+          "kid": "pw191b2389e7ee899ff4b61adcb9330f78a",
+          "sig": "mp4EtratfQZW40U3FTjNMLiYK2AdQOzkIVcYc3IZ2S2eYLht9z_HM2g9IcercE2rq-TTuvdmmzUcDEyoqNebAg"
+        }
+      },
+      "proof": [
+        "da408a8ce33fd1d4099b13cfc98ae028c4f6e88d06fba865633d668d9362a3c3",
+        "833316a842cd9ac5a56f9a107ee22eb89696c95179e49ac7505d18844e727c62",
+        "45f3313310592e95fd14dd00be9c2f512c7a4205582cecb60347c010c1efe9ec",
+        "61d6e203210c44456b06fd4b8cf9dc1df1efb0771c16b4fa4992cfc902aebb9c"
+      ]
+    },
+    {
+      "receipt": {
+        "v": 1,
+        "log": "lg_417dbf994390192d",
+        "seq": 7,
+        "prev": "14ad736aa657f2f1b977a819aa1b7f901a7677283e8f76567271117c49957197",
+        "ts": "2026-09-21T22:15:24.671Z",
+        "phase": "atomic",
+        "actor": {
+          "agent": "claude-opus-5",
+          "session": "sess_sample",
+          "principal": "ops@acme.test",
+          "runtime": "proofwire-proxy/0.2.0"
+        },
+        "action": {
+          "kind": "tool_call",
+          "target": "ops.query",
+          "metrics": {},
+          "params": {
+            "hash": "bf81cf20e9feee0d874588f9e565c9812f295eafd18c1fbb049c53ba433cf51a",
+            "size": 54,
+            "preview": {
+              "sql": "DELETE FROM customers WHERE churn_risk > 0.8"
+            }
+          }
+        },
+        "decision": {
+          "outcome": "deny",
+          "rules": [
+            "deny.destructive-sql"
+          ],
+          "reason": "destructive SQL from an agent is never permitted",
+          "policy": "775cd8af65effe38ef378d261100b416136eca9d9401fed1289b74ee34443e57"
+        },
+        "result": null,
+        "attest": {
+          "alg": "ed25519",
+          "kid": "pw191b2389e7ee899ff4b61adcb9330f78a",
+          "sig": "EAXn0JodWJVMu-TiL6MrraT8OE-32O1HET_6-V46FdjXiHtqFEbQP1xS6q5pibTl9GJHoKRuYUv-kE4tpc0lCQ"
+        }
+      },
+      "proof": [
+        "14ad736aa657f2f1b977a819aa1b7f901a7677283e8f76567271117c49957197",
+        "833316a842cd9ac5a56f9a107ee22eb89696c95179e49ac7505d18844e727c62",
+        "45f3313310592e95fd14dd00be9c2f512c7a4205582cecb60347c010c1efe9ec",
+        "61d6e203210c44456b06fd4b8cf9dc1df1efb0771c16b4fa4992cfc902aebb9c"
+      ]
+    },
+    {
+      "receipt": {
+        "v": 1,
+        "log": "lg_417dbf994390192d",
+        "seq": 8,
+        "prev": "da408a8ce33fd1d4099b13cfc98ae028c4f6e88d06fba865633d668d9362a3c3",
+        "ts": "2026-09-21T22:15:24.673Z",
+        "phase": "intent",
+        "actor": {
+          "agent": "claude-opus-5",
+          "session": "sess_sample",
+          "principal": "ops@acme.test",
+          "runtime": "proofwire-proxy/0.2.0"
+        },
+        "action": {
+          "kind": "tool_call",
+          "target": "ops.send_email",
+          "metrics": {},
+          "params": {
+            "hash": "2b0e08153fa58af4dcb7784c4da5449c2d9b2790b7874975383a4629c5c5666b",
+            "size": 70,
+            "preview": {
+              "to": "[redacted:email:…test]",
+              "subject": "Your refund",
+              "body": "On its way."
+            },
+            "redacted": [
+              "email"
+            ]
+          }
+        },
+        "decision": {
+          "outcome": "allow",
+          "rules": [
+            "escalate.customer-mail"
+          ],
+          "reason": "anything that reaches a customer gets a human first — approved by dana@acme.test",
+          "policy": "775cd8af65effe38ef378d261100b416136eca9d9401fed1289b74ee34443e57",
+          "approval": {
+            "by": "dana@acme.test",
+            "at": "2026-09-21T22:15:24.673Z",
+            "note": "reviewed in the approvals channel"
+          }
+        },
+        "result": null,
+        "attest": {
+          "alg": "ed25519",
+          "kid": "pw191b2389e7ee899ff4b61adcb9330f78a",
+          "sig": "GMOQTIuDGWbZDayUm5-94YzFQG_e6zsrVqGB5-8fsFKFdlBhxQgEWb5HQTl37A23bC7Y_4oeGbD97YlrFpwCAg"
+        }
+      },
+      "proof": [
+        "aa95cc7470e0b3d4d40af7eb5ccce875a7c7ab0bc81ea0d2728ae49b0abe1e8b",
+        "6718b6889e612714b4cc33d595588d5352fbf89a494c7160b86fb3cbfbe01049",
+        "fc627e9297492731171c4e4e1e7a3edc84d440739f94114f6e6becdfff812b55"
+      ]
+    },
+    {
+      "receipt": {
+        "v": 1,
+        "log": "lg_417dbf994390192d",
+        "seq": 9,
+        "prev": "3613e94669935f4ea383211c6b1e401007d79e6e8765b987dc0b4020854338a6",
+        "ts": "2026-09-21T22:15:24.676Z",
+        "phase": "outcome",
+        "actor": {
+          "agent": "claude-opus-5",
+          "session": "sess_sample",
+          "principal": "ops@acme.test",
+          "runtime": "proofwire-proxy/0.2.0"
+        },
+        "action": {
+          "kind": "tool_call",
+          "target": "ops.send_email",
+          "params": {
+            "hash": "32325fd1fd185bc93d9e47616d06ee9b9d06ed0f9ab718b37b4445e80b1a4654",
+            "size": 70,
+            "preview": {
+              "to": "[redacted:email:…test]",
+              "subject": "Your refund",
+              "body": "On its way."
+            },
+            "redacted": [
+              "email"
+            ]
+          }
+        },
+        "decision": {
+          "outcome": "allow",
+          "rules": [
+            "escalate.customer-mail"
+          ],
+          "reason": "anything that reaches a customer gets a human first — approved by dana@acme.test",
+          "policy": "775cd8af65effe38ef378d261100b416136eca9d9401fed1289b74ee34443e57",
+          "approval": {
+            "by": "dana@acme.test",
+            "at": "2026-09-21T22:15:24.673Z",
+            "note": "reviewed in the approvals channel"
+          }
+        },
+        "result": {
+          "status": "ok",
+          "latencyMs": 0,
+          "payload": {
+            "hash": "d67606e10473dca8d85ca36fe60c686620589461624ac983997f3bccd798fb74",
+            "size": 80,
+            "preview": {
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Sent \"Your refund\" to [redacted:email:…test]."
+                }
+              ]
+            },
+            "redacted": [
+              "email"
+            ]
+          }
+        },
+        "ref": "3613e94669935f4ea383211c6b1e401007d79e6e8765b987dc0b4020854338a6",
+        "attest": {
+          "alg": "ed25519",
+          "kid": "pw191b2389e7ee899ff4b61adcb9330f78a",
+          "sig": "f6je8m6SI1ERWRT84QMiElT6XkjgJjCGVO6aA06DMFR6QP_7vuH-mWQscVgLO_b-QElt0oI6iiIE_GfWzEgnCg"
+        }
+      },
+      "proof": [
+        "3613e94669935f4ea383211c6b1e401007d79e6e8765b987dc0b4020854338a6",
+        "6718b6889e612714b4cc33d595588d5352fbf89a494c7160b86fb3cbfbe01049",
+        "fc627e9297492731171c4e4e1e7a3edc84d440739f94114f6e6becdfff812b55"
+      ]
+    },
+    {
+      "receipt": {
+        "v": 1,
+        "log": "lg_417dbf994390192d",
+        "seq": 10,
+        "prev": "aa95cc7470e0b3d4d40af7eb5ccce875a7c7ab0bc81ea0d2728ae49b0abe1e8b",
+        "ts": "2026-09-21T22:15:24.679Z",
+        "phase": "atomic",
+        "actor": {
+          "agent": "claude-opus-5",
+          "session": "sess_sample",
+          "principal": "ops@acme.test",
+          "runtime": "proofwire-proxy/0.2.0"
+        },
+        "action": {
+          "kind": "tool_call",
+          "target": "ops.query",
+          "metrics": {},
+          "params": {
+            "hash": "74ae49c9334e3e94e82f46e264b62feb6bb5e4304f61dd49ac885995eed5a0a5",
+            "size": 82,
+            "preview": {
+              "sql": "SELECT * FROM logs WHERE token = '[redacted:anthropic_key:…H0jW]'"
+            },
+            "redacted": [
+              "anthropic_key"
+            ]
+          }
+        },
+        "decision": {
+          "outcome": "deny",
+          "rules": [
+            "egress.guard"
+          ],
+          "reason": "arguments contain anthropic_key; policy forbids sending these to a tool",
+          "policy": "775cd8af65effe38ef378d261100b416136eca9d9401fed1289b74ee34443e57",
+          "meta": {
+            "findings": [
+              {
+                "path": "sql",
+                "type": "anthropic_key",
+                "severity": "secret"
+              }
+            ]
+          }
+        },
+        "result": null,
+        "attest": {
+          "alg": "ed25519",
+          "kid": "pw191b2389e7ee899ff4b61adcb9330f78a",
+          "sig": "CBllzd9I_U5X-3ILe3X944BEdVD0mqnHFm7adg-uc1wrIw7flcJtg3pb8vDHPe2qDcGrh8yBAlPUiyEuc5mKDg"
+        }
+      },
+      "proof": [
+        "2857ad0010b91ebe0c17f995e4c63f4004463f1912853c9e41e6e080d8617983",
+        "fc627e9297492731171c4e4e1e7a3edc84d440739f94114f6e6becdfff812b55"
+      ]
+    }
+  ]
+}

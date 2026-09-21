@@ -6,6 +6,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -25,18 +26,32 @@ const attrs = (html, name) => [...html.matchAll(new RegExp(`\\s${name}="([^"]*)"
 const isExternal = (u) => /^(https?:)?\/\//i.test(u);
 const isRelative = (u) => !isExternal(u) && !u.startsWith('/') && !u.startsWith('#') && !/^[a-z][a-z0-9+.-]*:/i.test(u);
 
-test('every relative reference resolves to a file that is published', () => {
+/** Every file the page pulls in, as paths under site/. */
+function referencedFiles() {
   const refs = [
     ...attrs(INDEX, 'href'), ...attrs(INDEX, 'src'),
     ...[...FONTS_CSS.matchAll(/url\("([^"]+)"\)/g)].map((m) => `fonts/${m[1]}`),
     ...[...APP.matchAll(/fetch\('([^']+)'\)/g)].map((m) => m[1]),
     ...[...APP.matchAll(/from '(\.[^']+)'/g)].map((m) => m[1]),
   ].filter(isRelative);
+  return refs.map((ref) => (ref === './' ? 'index.html' : path.posix.normalize(ref.split(/[?#]/)[0])));
+}
 
-  assert.ok(refs.length >= 6, `expected to find the page's own assets, found ${refs.length}`);
-  for (const ref of refs) {
-    const file = ref === './' ? 'index.html' : ref.split(/[?#]/)[0];
-    assert.ok(existsSync(path.join(SITE, file)), `${ref} does not exist under site/`);
+test('every relative reference resolves to a file that is published', () => {
+  const files = referencedFiles();
+  assert.ok(files.length >= 6, `expected to find the page's own assets, found ${files.length}`);
+  for (const file of files) assert.ok(existsSync(path.join(SITE, file)), `${file} does not exist under site/`);
+});
+
+test('everything the page references is tracked by git, not merely present on this machine', (t) => {
+  // .gitignore has `*.bundle.json`, so the sample bundle sat on disk, every test
+  // passed here, and the first place anyone found out was a red CI run — with a
+  // deployed page whose sample would have 404ed. This is where it should show.
+  const git = spawnSync('git', ['ls-files', '--', 'site'], { cwd: ROOT, encoding: 'utf8' });
+  if (git.error || git.status !== 0 || !git.stdout.trim()) return t.skip('not a git checkout');
+  const tracked = new Set(git.stdout.split('\n').map((f) => f.trim()));
+  for (const file of new Set(referencedFiles())) {
+    assert.ok(tracked.has(`site/${file}`), `site/${file} exists but git does not track it — check .gitignore (git check-ignore -v site/${file})`);
   }
 });
 

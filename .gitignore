@@ -8,6 +8,8 @@ node_modules/
 **/.proofwire/salts.jsonl
 .proofwire-witness/
 *.bundle.json
+# The website loads this one: the sample evidence its verifier checks. Kept on purpose.
+!site/sample.bundle.json
 
 # Hub database and its SQLite sidecars.
 data/
