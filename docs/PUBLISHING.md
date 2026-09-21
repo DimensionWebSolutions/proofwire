@@ -44,8 +44,9 @@ public packages:
 
 **https://www.npmjs.com/org/create** → name it `proofwire`.
 
-Without it those four fail to publish. The unscoped `proofwire` CLI — the one
-people actually install — publishes either way.
+Without it those four fail to publish, and it is not optional for the CLI
+either: the unscoped `proofwire` package depends on `@proofwire/core` and
+`@proofwire/proxy`, so a CLI published without them installs nowhere.
 
 ### What the script does
 
