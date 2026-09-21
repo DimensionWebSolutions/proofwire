@@ -8,3 +8,9 @@ node_modules/
 **/.proofwire/salts.jsonl
 .proofwire-witness/
 *.bundle.json
+
+# Hub database and its SQLite sidecars.
+data/
+*.db
+*.db-wal
+*.db-shm

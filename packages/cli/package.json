@@ -1,15 +1,29 @@
 {
   "name": "proofwire",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Tamper-evident receipts for AI agent actions. Policy, proof, and audit for MCP.",
   "license": "Apache-2.0",
-  "bin": { "pw": "./src/bin.js", "proofwire": "./src/bin.js" },
-  "files": ["src"],
-  "keywords": ["mcp", "ai-agents", "audit", "compliance", "transparency-log", "eu-ai-act"],
-  "dependencies": {
-    "@proofwire/core": "0.1.0",
-    "@proofwire/proxy": "0.1.0"
+  "bin": {
+    "pw": "./src/bin.js",
+    "proofwire": "./src/bin.js"
   },
-  "engines": { "node": ">=20.11" }
+  "files": [
+    "src"
+  ],
+  "keywords": [
+    "mcp",
+    "ai-agents",
+    "audit",
+    "compliance",
+    "transparency-log",
+    "eu-ai-act"
+  ],
+  "dependencies": {
+    "@proofwire/core": "0.2.0",
+    "@proofwire/proxy": "0.2.0"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
 }

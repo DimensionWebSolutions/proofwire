@@ -9,6 +9,10 @@ file you can edit.
 Proofwire makes every agent action **policy-gated before it runs** and
 **cryptographically provable afterwards**. One line of config. No code change.
 
+Run it standalone on one machine, or as a **hub** your whole organisation
+writes to — with shared policy, an approvals inbox, tenant isolation, and
+independent witnesses that make a hosted log worth believing.
+
 ```bash
 npm install -g proofwire
 pw init
@@ -61,6 +65,52 @@ resulting log four ways and shows each attack being caught:
 
 ---
 
+## For teams: the hub
+
+```bash
+docker compose up -d
+docker compose exec hub node packages/server/src/bin.js bootstrap
+```
+
+```bash
+pw remote add --url https://hub.acme.com --token <agent token>
+pw proxy --namespace crm -- npx -y @acme/mcp-crm
+```
+
+The proxy now fetches your organisation's active policy at startup, enforces
+it, records locally, and streams receipts to the hub — where an operator sees
+this:
+
+```
+Acme Financial                                          ✓ verified
+  11 receipts · 30d      3 actions blocked      1 log      11 entries
+
+  RECENTLY BLOCKED
+  48s   ops.query    DENY   arguments contain anthropic_key; policy forbids sending these to a tool
+  48s   ops.refund   DENY   budget refunds.daily would be exceeded: 45 already committed plus 90
+                            proposed, against a cap of 100 per 24h
+  1m    ops.query    DENY   destructive SQL from an agent is never permitted
+```
+
+What the hub adds:
+
+| | |
+| --- | --- |
+| **Shared policy** | Versioned, immutable, rolled back by version. Agents fetch the active one and record its hash in every receipt. |
+| **Approvals inbox** | Escalations reach a human in the console. Undecided requests expire into a denial — never into an approval. |
+| **Tenant isolation** | Every row names its org. A credential cannot reach another organisation's data by any route, including by guessing an id. |
+| **Witness service** | Counter-signs roots, and refuses two roots at one size. This is what defeats a split view. |
+| **Its own audit trail** | Every administrative action is hash-chained. We ask you to trust a tamper-evident record, so ours is one too. |
+
+**The hub is not trusted and does not need to be.** It never holds a signing
+key, so it cannot forge a receipt — and it is not load-bearing either: an agent
+whose hub is unreachable keeps running, keeps recording locally, and ships the
+backlog when it returns.
+
+Full deployment and operations guide: [`docs/HUB.md`](docs/HUB.md).
+
+---
+
 ## Why this is different
 
 Everyone is building agent **observability** — dashboards that show you what
@@ -75,6 +125,7 @@ using nothing but the file you hand them.
 | Survives an insider with DB access | ❌              | ✅        |
 | Verifiable by someone who distrusts you | ❌         | ✅        |
 | Erasure without breaking the audit trail | ❌        | ✅        |
+| Survives the *vendor* being the adversary | ❌       | ✅        |
 
 The distinction matters the day a regulator, an insurer, or opposing counsel
 asks *"prove it."* A dashboard is a claim. A signed, witnessed Merkle root is
@@ -199,6 +250,13 @@ Prove
   pw export [file]               evidence bundle for a third party
   pw check <file>                verify a bundle with nothing but itself
 
+Hub
+  pw remote add --url <hub> --token <key>   connect this machine
+  pw push                        ship local receipts the hub is missing
+  pw remote-verify <log>         verify a hosted log from outside
+  pw policy push|pull|list       manage the org's shared policy
+  pw cosign                      have a witness counter-sign your latest root
+
 Govern
   pw keys                        public keys to publish for verifiers
   pw witness keygen              create an independent witness identity
@@ -248,6 +306,9 @@ than none:
   through it. An agent with a second, unwrapped path to the same API leaves no
   receipt. Route tools through the proxy and treat unwrapped credentials as the
   hole they are.
+- **A hub's own signing keys live in its database** in `0.2.0`. A KMS/HSM
+  backend is the next piece of work; until then, treat that database as key
+  material.
 - **It cannot stop an attacker with the signing key from writing false
   receipts going forward.** It *can* stop them rewriting the past, once a
   checkpoint has been witnessed. Keep the key in a KMS or HSM in production.
@@ -263,9 +324,11 @@ See [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md) for the full analysis.
 
 ## Status
 
-`0.1.0` — the cryptography, policy engine, proxy, and CLI are complete and
-covered by 90 tests, including exhaustive Merkle proof verification for every
-tree size up to 64 and every `(m, n)` consistency pair up to 48.
+`0.2.0` — cryptography, policy engine, proxy, CLI, and the multi-tenant hub are
+complete and covered by **145 tests**: exhaustive Merkle proof verification for
+every tree size up to 64 and every `(m, n)` consistency pair up to 48, plus
+end-to-end tests that run a real agent through a real proxy against a real hub
+over HTTP.
 
 ```bash
 npm test

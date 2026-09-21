@@ -2,11 +2,15 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { ProofLog, verifyBundle, Policy, verifyInclusion, unhex, generateIdentity } from '@proofwire/core';
-import { McpProxy } from '@proofwire/proxy';
+import { McpProxy, auditPolicyMetrics } from '@proofwire/proxy';
+import { RemoteSink, hubApprover, fetchPolicy } from '@proofwire/proxy/remote';
 import { approverFrom } from '@proofwire/proxy/approve';
 import { c, out, err, ok, bad, warn, info, heading, kv, table, outcomeBadge, parseArgs } from './ui.js';
+import {
+  cmdRemote, cmdPush, cmdRemoteVerify, cmdPolicy, cmdCosign, loadRemotes, resolveRemote,
+} from './remote-cmds.js';
 
-const VERSION = '0.1.0';
+const VERSION = '0.2.0';
 const CONFIG = 'proofwire.config.json';
 const POLICY = 'proofwire.policy.json';
 
@@ -150,7 +154,49 @@ async function cmdProxy(args) {
   }
   const { dir, config } = loadConfig(args);
   const log = ProofLog.open(dir);
-  const policy = loadPolicy(config, args);
+
+  // A hub, when one is configured, supplies the policy and the approvals
+  // inbox and receives a copy of every receipt. The local log stays
+  // authoritative throughout: if the hub is unreachable the agent keeps
+  // running and keeps recording, and the backlog ships when it returns.
+  const remoteName = args.remote ?? (args['no-remote'] ? null : 'default');
+  const remote = remoteName && loadRemotes()[remoteName] ? resolveRemote({ remote: remoteName }) : null;
+  const logSlug = args.name ?? remote?.log ?? config.remoteLog ?? log.logId;
+
+  let policy = null;
+  if (remote && !args.policy) {
+    const slug = args['policy-name'] ?? config.policyName ?? 'default';
+    try {
+      const active = await fetchPolicy({ url: remote.url, token: remote.token, slug });
+      if (active) {
+        policy = new Policy(active.policy);
+        err(c.grey(`proofwire: policy ${slug} v${active.version} (${active.hash.slice(0, 8)}) from ${remote.url}`));
+      }
+    } catch (e) {
+      // Falling back to the local policy is right; falling back to *no* policy
+      // would quietly turn enforcement off because a network call failed.
+      err(c.yellow(`proofwire: could not fetch policy from the hub (${e.message}); using the local file`));
+    }
+  }
+  if (!policy) policy = loadPolicy(config, args);
+
+  // A budget nobody can compute is worse than no budget: it reads as
+  // protection in the policy document while enforcing nothing.
+  for (const w of auditPolicyMetrics(policy, config.metrics ?? {})) {
+    err(c.yellow(`proofwire: ${w}`));
+  }
+
+  let sink = null;
+  if (remote) {
+    sink = new RemoteSink({
+      url: remote.url,
+      token: remote.token,
+      log: logSlug,
+      localLog: log,
+      onLog: (level, msg) => err(level === 'error' ? c.red(`proofwire: ${msg}`) : c.grey(`proofwire: ${msg}`)),
+    });
+    if (await sink.connect()) sink.start();
+  }
 
   const proxy = new McpProxy({
     log,
@@ -160,7 +206,10 @@ async function cmdProxy(args) {
       session: args.session ?? 'sess_' + Date.now().toString(36),
       principal: args.principal ?? config.actor?.principal ?? 'unknown',
     },
-    approver: approverFrom(args.approve ? { mode: args.approve } : config.approval),
+    approver:
+      remote && (args.approve ?? config.approval?.mode) !== 'tty'
+        ? hubApprover({ url: remote.url, token: remote.token, log: logSlug })
+        : approverFrom(args.approve ? { mode: args.approve } : config.approval),
     command: args.rest[0],
     args: args.rest.slice(1),
     namespace: args.namespace ?? config.namespace,
@@ -186,22 +235,27 @@ async function cmdProxy(args) {
       err(`proofwire: could not finalize the log: ${e.message}`);
     }
   };
-  process.on('SIGINT', () => {
+
+  /** Flush the tail to the hub before the process goes away. */
+  const drain = async () => {
     finish();
-    process.exit(130);
-  });
-  process.on('SIGTERM', () => {
-    finish();
-    process.exit(143);
-  });
+    if (sink) await sink.stop();
+  };
+  for (const [signal, code] of [['SIGINT', 130], ['SIGTERM', 143]]) {
+    process.on(signal, async () => {
+      await drain();
+      process.exit(code);
+    });
+  }
 
   const code = await proxy.start();
-  finish();
+  await drain();
   const s = proxy.stats;
   err(
     c.grey(
       `proofwire · ${log.size} receipts · ${s.forwarded} allowed · ${s.denied} blocked · ` +
-        `${s.approved}/${s.escalated} approvals · root ${log.root.slice(0, 16)}…`,
+        `${s.approved}/${s.escalated} approvals · root ${log.root.slice(0, 16)}…` +
+        (sink ? ` · hub ${sink.status().behind === 0 ? 'in sync' : `${sink.status().behind} behind`}` : ''),
     ),
   );
   return code;
@@ -597,6 +651,7 @@ function cmdHelp() {
   out(`      ${c.grey('--namespace <ns>')}            prefix tool names in receipts`);
   out(`      ${c.grey('--principal <id>')}            who the agent is acting for`);
   out(`      ${c.grey('--approve tty|webhook|deny')}  how escalations get resolved`);
+  out(`      ${c.grey('--no-remote')}                 record locally only, ignore the hub`);
   out('');
   out(`  ${c.bold('Inspect')}`);
   out(`    ${c.cyan('pw log')}                         recent receipts  ${c.grey('[--tail N --denied --target X --json]')}`);
@@ -608,6 +663,13 @@ function cmdHelp() {
   out(`    ${c.cyan('pw prove <seq>')}                 inclusion proof for one receipt`);
   out(`    ${c.cyan('pw export [file]')}               evidence bundle for a third party  ${c.grey('[--since --session]')}`);
   out(`    ${c.cyan('pw check <file>')}                verify a bundle with nothing but itself`);
+  out('');
+  out(`  ${c.bold('Hub')}   ${c.grey('connect to a Proofwire hub for your team')}`);
+  out(`    ${c.cyan('pw remote add --url <hub> --token <key>')}   connect this machine`);
+  out(`    ${c.cyan('pw push')}                        ship local receipts the hub is missing`);
+  out(`    ${c.cyan('pw remote-verify <log>')}         verify a hosted log from outside`);
+  out(`    ${c.cyan('pw policy push|pull|list')}       manage the org's shared policy`);
+  out(`    ${c.cyan('pw cosign')}                      have the hub's witness counter-sign`);
   out('');
   out(`  ${c.bold('Govern')}`);
   out(`    ${c.cyan('pw keys')}                        public keys to publish for verifiers`);
@@ -622,6 +684,11 @@ function cmdHelp() {
 
 const COMMANDS = {
   init: cmdInit,
+  remote: cmdRemote,
+  push: cmdPush,
+  'remote-verify': cmdRemoteVerify,
+  policy: cmdPolicy,
+  cosign: cmdCosign,
   proxy: cmdProxy,
   verify: cmdVerify,
   audit: cmdVerify,

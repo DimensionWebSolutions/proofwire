@@ -1,0 +1,25 @@
+{
+  "name": "@proofwire/server",
+  "version": "0.2.0",
+  "type": "module",
+  "description": "Proofwire hub — multi-tenant transparency log, policy registry, approvals, and witness service.",
+  "license": "Apache-2.0",
+  "main": "./src/app.js",
+  "exports": {
+    ".": "./src/app.js",
+    "./store": "./src/store.js",
+    "./auth": "./src/auth.js"
+  },
+  "bin": {
+    "proofwire-hub": "./src/bin.js"
+  },
+  "files": [
+    "src"
+  ],
+  "dependencies": {
+    "@proofwire/core": "0.2.0"
+  },
+  "engines": {
+    "node": ">=22.5"
+  }
+}

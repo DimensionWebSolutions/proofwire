@@ -240,6 +240,34 @@ export class ProofLog {
   }
 
   /**
+   * Attach a signature — normally a witness countersignature — to the stored
+   * checkpoint at `size`.
+   *
+   * Obtaining a witness signature and not keeping it would be pointless: the
+   * signature is the evidence, and it has to be in the file that gets exported.
+   * The checkpoint body is unchanged, so every existing signature over it stays
+   * valid; only the signature set grows.
+   *
+   * @param {number} size
+   * @param {import('./checkpoint.js').Signature} signature
+   * @returns {import('./checkpoint.js').Checkpoint}
+   */
+  addSignature(size, signature) {
+    const file = path.join(this.dir, FILES.checkpoints);
+    const all = this.checkpoints();
+    const target = all.find((cp) => cp.body.size === size);
+    if (!target) {
+      throw new Error(`no checkpoint at size ${size} in this log`);
+    }
+    // Replacing by kid keeps this idempotent: re-witnessing the same root
+    // updates the signature rather than accumulating duplicates.
+    target.sigs = [...target.sigs.filter((s) => s.kid !== signature.kid), signature];
+
+    fs.writeFileSync(file, all.map((cp) => canonicalize(cp)).join('\n') + '\n');
+    return target;
+  }
+
+  /**
    * The commitment salts for one entry, if they still exist.
    *
    * @param {number} seq

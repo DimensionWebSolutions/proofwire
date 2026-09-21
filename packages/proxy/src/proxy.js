@@ -17,7 +17,7 @@ import { History, redact, entryHash } from '@proofwire/core';
  * a proxy that only forwards what it recognises breaks on the next release.
  */
 
-const RUNTIME = 'proofwire-proxy/0.1.0';
+const RUNTIME = 'proofwire-proxy/0.2.0';
 
 /**
  * Pull a dotted path out of an object.
@@ -66,6 +66,42 @@ export function extractMetrics(config, target, params) {
     }
   }
   return out;
+}
+
+/**
+ * Cross-check a policy's budgets against the metrics this runtime can actually
+ * produce.
+ *
+ * A budget over `metrics.amount_usd` is inert unless something extracts that
+ * number from the tool's arguments. Nothing errors, nothing logs, and the cap
+ * simply never fires — the guardrail exists on paper and not in production.
+ * This is the same failure the policy loader refuses to allow for a typo'd
+ * operator, and it deserves the same treatment.
+ *
+ * @param {import('@proofwire/core').Policy} policy
+ * @param {Record<string, any>} metricsConfig
+ * @returns {string[]} Human-readable warnings; empty when the policy is wired up.
+ */
+export function auditPolicyMetrics(policy, metricsConfig) {
+  /** @type {Set<string>} */
+  const produced = new Set();
+  for (const spec of Object.values(metricsConfig ?? {})) {
+    for (const name of Object.keys(/** @type {object} */ (spec) ?? {})) produced.add(name);
+  }
+
+  /** @type {string[]} */
+  const warnings = [];
+  for (const budget of policy.budgets ?? []) {
+    const field = String(budget.field ?? '');
+    if (!field.startsWith('metrics.')) continue;
+    const name = field.slice('metrics.'.length);
+    if (produced.has(name)) continue;
+    warnings.push(
+      `budget "${budget.id}" caps ${field}, but nothing here produces "${name}". ` +
+        `This budget will never fire. Add a metrics extractor for the tools it covers.`,
+    );
+  }
+  return warnings;
 }
 
 /**

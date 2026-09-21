@@ -1,6 +1,6 @@
 {
   "name": "@proofwire/proxy",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "description": "Drop-in MCP proxy that enforces Proofwire policy and writes receipts.",
   "license": "Apache-2.0",
@@ -8,11 +8,16 @@
   "exports": {
     ".": "./src/proxy.js",
     "./jsonrpc": "./src/jsonrpc.js",
-    "./approve": "./src/approve.js"
+    "./approve": "./src/approve.js",
+    "./remote": "./src/remote.js"
   },
-  "files": ["src"],
+  "files": [
+    "src"
+  ],
   "dependencies": {
-    "@proofwire/core": "0.1.0"
+    "@proofwire/core": "0.2.0"
   },
-  "engines": { "node": ">=20.11" }
+  "engines": {
+    "node": ">=20.11"
+  }
 }

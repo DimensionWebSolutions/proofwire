@@ -1,9 +1,9 @@
 {
   "name": "proofwire-monorepo",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "type": "module",
-  "description": "Proofwire \u2014 tamper-evident, independently verifiable receipts for AI agent actions.",
+  "description": "Proofwire — tamper-evident, independently verifiable receipts for AI agent actions.",
   "license": "Apache-2.0",
   "engines": {
     "node": ">=20.11"
@@ -12,11 +12,13 @@
     "packages/core",
     "packages/proxy",
     "packages/cli",
-    "packages/dashboard"
+    "packages/dashboard",
+    "packages/server"
   ],
   "scripts": {
-    "test": "node --test",
+    "test": "node --no-warnings=ExperimentalWarning --test",
     "demo": "node examples/demo.js",
-    "pw": "node packages/cli/src/bin.js"
+    "pw": "node packages/cli/src/bin.js",
+    "hub": "node --no-warnings=ExperimentalWarning packages/server/src/bin.js"
   }
 }

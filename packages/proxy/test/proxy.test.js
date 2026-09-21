@@ -409,3 +409,33 @@ test('launching handles Windows shims and spaced interpreter paths alike', async
     assert.equal(launchSpec('npx', ['-y', 'x']).shell, false);
   }
 });
+
+test('a budget with no metric extractor behind it is reported, not silently inert', async () => {
+  const { auditPolicyMetrics } = await import('../src/proxy.js');
+
+  const policy = new Policy({
+    version: 1,
+    budgets: [
+      { id: 'refunds.daily', match: { target: '*' }, field: 'metrics.amount_usd', limit: 100 },
+      { id: 'calls.daily', match: { target: '*' }, field: 'metrics.tokens', limit: 10 },
+    ],
+  });
+
+  const unwired = auditPolicyMetrics(policy, { 'stripe.*': { other_number: 'params.x' } });
+  assert.equal(unwired.length, 2, 'both budgets are inert and both should be named');
+  assert.match(unwired[0], /budget "refunds.daily" caps metrics.amount_usd/);
+  assert.match(unwired[0], /will never fire/);
+
+  const wired = auditPolicyMetrics(policy, {
+    'ops.*': { amount_usd: { from: 'params.amount', scale: 0.01 } },
+    'llm.*': { tokens: 'params.n' },
+  });
+  assert.deepEqual(wired, [], 'a fully wired policy should produce no warnings');
+
+  // A budget over a clear-text param, rather than a metric, needs no extractor.
+  const direct = new Policy({
+    version: 1,
+    budgets: [{ id: 'b', match: { target: '*' }, field: 'params.amount', limit: 1 }],
+  });
+  assert.deepEqual(auditPolicyMetrics(direct, {}), []);
+});

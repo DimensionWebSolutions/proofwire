@@ -1,0 +1,375 @@
+import { DatabaseSync } from 'node:sqlite';
+import { randomBytes } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+
+/**
+ * Storage for the Proofwire hub.
+ *
+ * SQLite, via Node's built-in driver, because the hub's correctness depends on
+ * transactional appends and this brings no supply chain with it. A receipt
+ * that lands without its chain head advancing atomically is a corrupt log, and
+ * "we append to two files and hope" is not a design.
+ *
+ * The schema carries one rule everywhere: **every row that belongs to a tenant
+ * names its org_id directly**, even where it could be derived by joining. A
+ * query that forgets the tenant filter then fails loudly at the schema rather
+ * than quietly returning another customer's data.
+ */
+
+/** Prefixes make a leaked identifier self-describing in a log or a bug report. */
+export const ID_PREFIX = {
+  org: 'org',
+  user: 'usr',
+  key: 'pwk',
+  log: 'lg',
+  checkpoint: 'cp',
+  policy: 'pol',
+  approval: 'apr',
+  witness: 'wit',
+  event: 'ev',
+  session: 'ses',
+};
+
+/**
+ * @param {keyof typeof ID_PREFIX} kind
+ * @returns {string}
+ */
+export function newId(kind) {
+  return `${ID_PREFIX[kind]}_${randomBytes(12).toString('hex')}`;
+}
+
+/**
+ * Migrations run in order and are recorded, so an existing deployment upgrades
+ * without a separate tool. Each entry is append-only once shipped: editing a
+ * migration that has already run somewhere is how schemas drift apart.
+ *
+ * @type {{ id: string, sql: string }[]}
+ */
+const MIGRATIONS = [
+  {
+    id: '001_core',
+    sql: `
+      CREATE TABLE orgs (
+        id          TEXT PRIMARY KEY,
+        slug        TEXT NOT NULL UNIQUE,
+        name        TEXT NOT NULL,
+        plan        TEXT NOT NULL DEFAULT 'open',
+        settings    TEXT NOT NULL DEFAULT '{}',
+        created_at  TEXT NOT NULL,
+        suspended_at TEXT
+      );
+
+      CREATE TABLE users (
+        id          TEXT PRIMARY KEY,
+        email       TEXT NOT NULL UNIQUE,
+        name        TEXT NOT NULL DEFAULT '',
+        password_hash TEXT,
+        created_at  TEXT NOT NULL,
+        last_seen_at TEXT
+      );
+
+      CREATE TABLE memberships (
+        org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        role        TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        PRIMARY KEY (org_id, user_id)
+      );
+
+      CREATE TABLE sessions (
+        id          TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash  TEXT NOT NULL UNIQUE,
+        created_at  TEXT NOT NULL,
+        expires_at  TEXT NOT NULL,
+        revoked_at  TEXT
+      );
+
+      CREATE TABLE api_keys (
+        id          TEXT PRIMARY KEY,
+        org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        name        TEXT NOT NULL,
+        secret_hash TEXT NOT NULL,
+        scopes      TEXT NOT NULL,
+        log_id      TEXT,
+        created_at  TEXT NOT NULL,
+        created_by  TEXT,
+        last_used_at TEXT,
+        expires_at  TEXT,
+        revoked_at  TEXT
+      );
+      CREATE INDEX idx_keys_org ON api_keys(org_id);
+
+      CREATE TABLE logs (
+        id          TEXT PRIMARY KEY,
+        org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        slug        TEXT NOT NULL,
+        name        TEXT NOT NULL DEFAULT '',
+        kid         TEXT NOT NULL,
+        public_key  TEXT NOT NULL,
+        size        INTEGER NOT NULL DEFAULT 0,
+        head        TEXT NOT NULL,
+        root        TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        last_seen_at TEXT,
+        archived_at TEXT,
+        UNIQUE (org_id, slug)
+      );
+
+      CREATE TABLE receipts (
+        log_id      TEXT NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
+        seq         INTEGER NOT NULL,
+        org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        hash        TEXT NOT NULL,
+        prev        TEXT NOT NULL,
+        ts          TEXT NOT NULL,
+        phase       TEXT NOT NULL,
+        ref         TEXT,
+        kind        TEXT NOT NULL,
+        target      TEXT NOT NULL,
+        outcome     TEXT NOT NULL,
+        principal   TEXT NOT NULL,
+        agent       TEXT NOT NULL,
+        session     TEXT NOT NULL,
+        status      TEXT,
+        latency_ms  INTEGER,
+        metrics     TEXT NOT NULL DEFAULT '{}',
+        body        TEXT NOT NULL,
+        received_at TEXT NOT NULL,
+        PRIMARY KEY (log_id, seq)
+      );
+      CREATE INDEX idx_receipts_org_ts   ON receipts(org_id, ts DESC);
+      CREATE INDEX idx_receipts_outcome  ON receipts(org_id, outcome, ts DESC);
+      CREATE INDEX idx_receipts_target   ON receipts(org_id, target);
+      CREATE INDEX idx_receipts_session  ON receipts(org_id, session);
+      CREATE UNIQUE INDEX idx_receipts_hash ON receipts(log_id, hash);
+
+      CREATE TABLE checkpoints (
+        id          TEXT PRIMARY KEY,
+        log_id      TEXT NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
+        org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        size        INTEGER NOT NULL,
+        root        TEXT NOT NULL,
+        head        TEXT NOT NULL,
+        ts          TEXT NOT NULL,
+        body        TEXT NOT NULL,
+        sigs        TEXT NOT NULL,
+        witness_count INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (log_id, size)
+      );
+
+      CREATE TABLE witnesses (
+        id          TEXT PRIMARY KEY,
+        org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        kid         TEXT NOT NULL,
+        public_key  TEXT NOT NULL,
+        name        TEXT NOT NULL,
+        url         TEXT,
+        operator    TEXT NOT NULL DEFAULT '',
+        created_at  TEXT NOT NULL,
+        removed_at  TEXT,
+        UNIQUE (org_id, kid)
+      );
+
+      CREATE TABLE witness_state (
+        witness_kid TEXT NOT NULL,
+        log_id      TEXT NOT NULL,
+        size        INTEGER NOT NULL,
+        root        TEXT NOT NULL,
+        updated_at  TEXT NOT NULL,
+        PRIMARY KEY (witness_kid, log_id)
+      );
+
+      CREATE TABLE policies (
+        id          TEXT PRIMARY KEY,
+        org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        slug        TEXT NOT NULL,
+        version     INTEGER NOT NULL,
+        doc         TEXT NOT NULL,
+        hash        TEXT NOT NULL,
+        note        TEXT NOT NULL DEFAULT '',
+        created_at  TEXT NOT NULL,
+        created_by  TEXT,
+        active      INTEGER NOT NULL DEFAULT 0,
+        UNIQUE (org_id, slug, version)
+      );
+      CREATE INDEX idx_policies_active ON policies(org_id, slug, active);
+
+      CREATE TABLE approvals (
+        id          TEXT PRIMARY KEY,
+        org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        log_id      TEXT NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
+        target      TEXT NOT NULL,
+        params      TEXT NOT NULL,
+        reason      TEXT NOT NULL,
+        rules       TEXT NOT NULL DEFAULT '[]',
+        principal   TEXT NOT NULL,
+        agent       TEXT NOT NULL,
+        session     TEXT NOT NULL,
+        status      TEXT NOT NULL DEFAULT 'pending',
+        requested_at TEXT NOT NULL,
+        expires_at  TEXT NOT NULL,
+        decided_at  TEXT,
+        decided_by  TEXT,
+        note        TEXT
+      );
+      CREATE INDEX idx_approvals_pending ON approvals(org_id, status, requested_at DESC);
+
+      CREATE TABLE audit_events (
+        id          TEXT PRIMARY KEY,
+        org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        seq         INTEGER NOT NULL,
+        prev        TEXT NOT NULL,
+        hash        TEXT NOT NULL,
+        actor       TEXT NOT NULL,
+        actor_kind  TEXT NOT NULL,
+        action      TEXT NOT NULL,
+        subject     TEXT NOT NULL DEFAULT '',
+        meta        TEXT NOT NULL DEFAULT '{}',
+        at          TEXT NOT NULL,
+        UNIQUE (org_id, seq)
+      );
+      CREATE INDEX idx_audit_org_at ON audit_events(org_id, at DESC);
+
+      CREATE TABLE server_keys (
+        kid         TEXT PRIMARY KEY,
+        role        TEXT NOT NULL,
+        public_key  TEXT NOT NULL,
+        private_pem TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        retired_at  TEXT
+      );
+    `,
+  },
+  {
+    id: '002_ingest_idempotency',
+    sql: `
+      -- A client that retries after a timeout must not create a second copy or
+      -- a chain gap. The batch id makes the whole submission replayable.
+      CREATE TABLE ingest_batches (
+        id          TEXT PRIMARY KEY,
+        log_id      TEXT NOT NULL REFERENCES logs(id) ON DELETE CASCADE,
+        org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        accepted    INTEGER NOT NULL,
+        first_seq   INTEGER NOT NULL,
+        last_seq    INTEGER NOT NULL,
+        head        TEXT NOT NULL,
+        root        TEXT NOT NULL,
+        size        INTEGER NOT NULL,
+        at          TEXT NOT NULL
+      );
+    `,
+  },
+  {
+    id: '003_usage_counters',
+    sql: `
+      -- Per-day counters, so billing and quota checks never scan the receipt
+      -- table. Written in the same transaction as the append.
+      CREATE TABLE usage_daily (
+        org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        day         TEXT NOT NULL,
+        receipts    INTEGER NOT NULL DEFAULT 0,
+        denials     INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (org_id, day)
+      );
+    `,
+  },
+  {
+    id: '004_canonical_log_id',
+    sql: `
+      -- The receipt's own "log" field is signed, so it is what ingest must
+      -- check against. The slug is a human-facing name the operator chooses
+      -- and can differ; conflating the two made every receipt unacceptable.
+      ALTER TABLE logs ADD COLUMN canonical TEXT NOT NULL DEFAULT '';
+      UPDATE logs SET canonical = slug WHERE canonical = '';
+      CREATE UNIQUE INDEX idx_logs_canonical ON logs(org_id, canonical);
+    `,
+  },
+];
+
+/**
+ * Open (and migrate) the hub database.
+ *
+ * @param {string} file  Path, or `:memory:` for tests.
+ * @returns {DatabaseSync}
+ */
+export function openDatabase(file) {
+  if (file !== ':memory:') {
+    fs.mkdirSync(path.dirname(path.resolve(file)), { recursive: true });
+  }
+  const db = new DatabaseSync(file);
+
+  // WAL lets readers (the console, exports) run while ingest writes.
+  // `busy_timeout` turns the inevitable concurrent-write collision into a short
+  // wait instead of an immediate SQLITE_BUSY thrown at a customer's agent.
+  if (file !== ':memory:') db.exec('PRAGMA journal_mode = WAL');
+  db.exec('PRAGMA foreign_keys = ON');
+  db.exec('PRAGMA busy_timeout = 5000');
+  db.exec('PRAGMA synchronous = FULL');
+
+  db.exec(`CREATE TABLE IF NOT EXISTS migrations (
+    id TEXT PRIMARY KEY,
+    applied_at TEXT NOT NULL
+  )`);
+
+  const applied = new Set(db.prepare('SELECT id FROM migrations').all().map((r) => r.id));
+  for (const m of MIGRATIONS) {
+    if (applied.has(m.id)) continue;
+    db.exec('BEGIN');
+    try {
+      db.exec(m.sql);
+      db.prepare('INSERT INTO migrations(id, applied_at) VALUES(?, ?)').run(
+        m.id,
+        new Date().toISOString(),
+      );
+      db.exec('COMMIT');
+    } catch (err) {
+      db.exec('ROLLBACK');
+      throw new Error(`migration ${m.id} failed: ${err.message}`);
+    }
+  }
+
+  return db;
+}
+
+/**
+ * Run `fn` inside a transaction, rolling back on any throw.
+ *
+ * Nested calls join the outer transaction rather than opening a second one,
+ * which SQLite does not support and which would otherwise commit half a batch.
+ *
+ * @template T
+ * @param {DatabaseSync} db
+ * @param {() => T} fn
+ * @returns {T}
+ */
+export function transact(db, fn) {
+  if (db.isTransaction) return fn();
+
+  // IMMEDIATE takes the write lock up front. A deferred transaction that
+  // upgrades mid-way can lose the race and fail after half the work is done.
+  db.exec('BEGIN IMMEDIATE');
+  try {
+    const out = fn();
+    db.exec('COMMIT');
+    return out;
+  } catch (err) {
+    try {
+      db.exec('ROLLBACK');
+    } catch {
+      // A rollback failure must not mask the original error.
+    }
+    throw err;
+  }
+}
+
+/** @returns {string} */
+export function now() {
+  return new Date().toISOString();
+}
+
+/** @returns {string} YYYY-MM-DD in UTC, for daily counters. */
+export function today() {
+  return new Date().toISOString().slice(0, 10);
+}

@@ -300,3 +300,49 @@ test('opening a log whose key does not match its config is refused', () => {
   fs.writeFileSync(path.join(dir, 'key.pem'), privateKeyPem);
   assert.throws(() => ProofLog.open(dir), /does not match config/);
 });
+
+test('a witness signature attached to a checkpoint survives export and verification', async () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 6);
+  const cp = log.checkpoint();
+
+  const witness = generateIdentity().identity;
+  log.trustKey(witness.kid, witness.publicKey);
+
+  const { cosign: cosignFn } = await import('../src/checkpoint.js');
+  const signature = cosignFn(cp, witness).sigs.find((s) => s.role === 'witness');
+  log.addSignature(cp.body.size, signature);
+
+  // It must be on disk, not just in memory — the bundle is read from the file.
+  const reopened = ProofLog.open(dir, { readOnly: true });
+  const stored = reopened.checkpoints().find((c) => c.body.size === cp.body.size);
+  assert.equal(stored.sigs.filter((s) => s.role === 'witness').length, 1);
+
+  const bundle = JSON.parse(JSON.stringify(reopened.bundle()));
+  const res = verifyBundle(bundle, { minWitnesses: 1 });
+  assert.ok(res.ok, JSON.stringify(res.issues, null, 2));
+
+  // And a policy demanding two witnesses must not be satisfied by one.
+  assert.equal(verifyBundle(bundle, { minWitnesses: 2 }).ok, false);
+});
+
+test('re-witnessing the same root replaces rather than duplicates', async () => {
+  const dir = tmpdir();
+  const log = ProofLog.create(dir);
+  fill(log, 3);
+  const cp = log.checkpoint();
+  const witness = generateIdentity().identity;
+  log.trustKey(witness.kid, witness.publicKey);
+
+  const { cosign: cosignFn } = await import('../src/checkpoint.js');
+  const sig = cosignFn(cp, witness).sigs.find((s) => s.role === 'witness');
+  log.addSignature(cp.body.size, sig);
+  log.addSignature(cp.body.size, sig);
+
+  const stored = ProofLog.open(dir, { readOnly: true })
+    .checkpoints()
+    .find((c) => c.body.size === cp.body.size);
+  assert.equal(stored.sigs.length, 2, 'one log signature plus one witness, not three');
+  assert.ok(log.audit().ok);
+});
