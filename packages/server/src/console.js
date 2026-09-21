@@ -168,6 +168,8 @@ const page = (html, status = 200, headers = {}) => ({ __html: html, status, head
  */
 export function renderConsole(hub, ctx, route) {
   if (route === '/login') return loginPage(hub, ctx);
+  if (route === '/forgot') return forgotPage(hub, ctx);
+  if (route === '/accept' || route === '/reset') return credentialPage(hub, ctx, route);
 
   if (!ctx.principal || ctx.principal.kind !== 'user') {
     // An API key is a machine credential; it has no console session and should
@@ -224,7 +226,118 @@ function loginPage(hub, ctx) {
           <div class="field"><label for="password">Password</label>
             <input id="password" name="password" type="password" autocomplete="current-password" required></div>
           <button class="go" type="submit" style="width:100%;padding:10px">Sign in</button>
-        </form></div>`,
+        </form>
+        <p style="margin-top:16px;font-size:13px"><a href="/forgot">Forgotten your password?</a></p>
+        </div>`,
+    }),
+  );
+}
+
+/**
+ * Request a reset.
+ *
+ * The confirmation is identical whether or not the address exists — anything
+ * else turns this page into a way to test which emails have accounts.
+ *
+ * @param {import('./app.js').Hub} hub
+ * @param {import('./http.js').Ctx} ctx
+ */
+function forgotPage(hub, ctx) {
+  const sent = ctx.query.get('sent') === '1';
+  return page(
+    layout({
+      title: 'Reset password',
+      path: '/login',
+      principal: null,
+      body: `<div class="login">
+        <p style="font-family:var(--mono);font-weight:700;margin:0 0 20px">proof<span style="color:var(--verify)">wire</span></p>
+        <h1>Reset password</h1>
+        ${sent
+          ? `<div class="banner">If that address has an account, a reset link has been issued.
+             It is good for one hour and can be used once.</div>
+             <p style="font-size:13px"><a href="/login">Back to sign in</a></p>`
+          : `<p class="sub">We will issue a single-use link, good for one hour.</p>
+             <form method="post" action="/forgot">
+               <div class="field"><label for="email">Email</label>
+                 <input id="email" name="email" type="email" autocomplete="username" required></div>
+               <button class="go" type="submit" style="width:100%;padding:10px">Send reset link</button>
+             </form>
+             <p style="margin-top:16px;font-size:13px"><a href="/login">Back to sign in</a></p>`}
+      </div>`,
+    }),
+  );
+}
+
+/**
+ * Accept an invitation, or complete a reset. One form, two framings.
+ *
+ * @param {import('./app.js').Hub} hub
+ * @param {import('./http.js').Ctx} ctx
+ * @param {string} route
+ */
+function credentialPage(hub, ctx, route) {
+  const invite = route === '/accept';
+  const token = ctx.query.get('token') ?? '';
+  const error = ctx.query.get('e');
+  const row = hub.tokens.peek(token, invite ? 'invite' : 'reset');
+  const title = invite ? 'Accept invitation' : 'Choose a new password';
+
+  // A dead link says so plainly and offers the way forward, rather than
+  // presenting a form that cannot possibly work.
+  if (!row) {
+    return page(
+      layout({
+        title,
+        path: '/login',
+        principal: null,
+        body: `<div class="login">
+          <p style="font-family:var(--mono);font-weight:700;margin:0 0 20px">proof<span style="color:var(--verify)">wire</span></p>
+          <h1>${esc(title)}</h1>
+          <div class="banner bad">This link is invalid, has already been used, or has expired.</div>
+          <p style="font-size:13px">
+            ${invite
+              ? 'Ask an administrator for a fresh invitation.'
+              : '<a href="/forgot">Request a new reset link</a>'}
+          </p>
+          <p style="font-size:13px"><a href="/login">Back to sign in</a></p>
+        </div>`,
+      }),
+      400,
+    );
+  }
+
+  const messages = {
+    mismatch: 'Those passwords did not match.',
+    weak_password: 'Use at least 12 characters.',
+    invalid_token: 'That link is no longer valid.',
+  };
+
+  return page(
+    layout({
+      title,
+      path: '/login',
+      principal: null,
+      body: `<div class="login">
+        <p style="font-family:var(--mono);font-weight:700;margin:0 0 20px">proof<span style="color:var(--verify)">wire</span></p>
+        <h1>${esc(title)}</h1>
+        <p class="sub">${esc(row.email)}${invite && row.role ? ` · joining as ${esc(row.role)}` : ''}</p>
+        ${error ? `<div class="banner bad">${esc(messages[error] ?? 'That did not work.')}</div>` : ''}
+        <form method="post" action="${esc(route)}">
+          <input type="hidden" name="token" value="${esc(token)}">
+          <div class="field"><label for="password">New password</label>
+            <input id="password" name="password" type="password" autocomplete="new-password"
+                   minlength="12" required></div>
+          <div class="field"><label for="confirm">Confirm</label>
+            <input id="confirm" name="confirm" type="password" autocomplete="new-password"
+                   minlength="12" required></div>
+          <button class="go" type="submit" style="width:100%;padding:10px">
+            ${invite ? 'Join' : 'Set password'}
+          </button>
+        </form>
+        <p class="dim" style="font-size:12px;margin-top:14px">
+          At least 12 characters. Setting a password signs out every other session.
+        </p>
+      </div>`,
     }),
   );
 }
@@ -576,17 +689,26 @@ function settings(hub, ctx) {
 
   <h2>Members</h2>
   <div class="panel scroll"><table>
-    <thead><tr><th>Email</th><th>Role</th><th>Added</th><th>Last seen</th></tr></thead>
-    <tbody>${members.map((m) => `<tr>
+    <thead><tr><th>Email</th><th>Role</th><th>Added</th><th>Last seen</th><th>State</th></tr></thead>
+    <tbody>${members.map((m) => {
+      const pending = !hub.db
+        .prepare('SELECT password_hash FROM users WHERE id = ?')
+        .get(m.id)?.password_hash;
+      return `<tr>
         <td><b>${esc(m.email)}</b></td>
         <td class="mono">${esc(m.role)}</td>
         <td class="dim">${esc(ago(m.created_at))}</td>
         <td class="dim">${esc(ago(m.last_seen_at))}</td>
-      </tr>`).join('')}
+        <td>${pending
+          ? '<span class="pill pending">invited</span>'
+          : '<span class="pill allow">active</span>'}</td>
+      </tr>`;
+    }).join('')}
     </tbody></table></div>
   <p class="dim" style="font-size:12px;margin-top:10px">
     An <span class="mono">auditor</span> can read everything and change nothing — that is the role to
-    hand an outside firm.</p>
+    hand an outside firm. Invite one with <span class="mono">POST /v1/invites</span>; the link is
+    returned once and never stored.</p>
 
   ${identity}`;
 }

@@ -1,7 +1,12 @@
 # Is it ready, and how do we take it live?
 
-**Short answer: the standalone tool is ready to launch. The hosted hub is not
-ready to hold anyone else's data yet, and the gap is four specific things.**
+> **Status: the four blockers below are closed.** What remains is the one
+> thing that cannot be self-certified — an external review — plus the
+> operational items in "needed soon". See the resolution notes under each.
+
+**The standalone tool is ready to launch. The hosted hub is ready for design
+partners running their own instance; a hosted service still waits on a
+published external review.**
 
 This document is deliberately blunt about what is and is not done. A product
 whose entire value proposition is "you don't have to take our word for it"
@@ -26,6 +31,7 @@ ceiling, and a server will be several times better.
 | Storage | 2.5 KB/receipt | 1M receipts ≈ 2.3 GB |
 | Cold tree rebuild, 4,000 leaves | 29 ms | Restart cost is negligible |
 | Dependencies | **0** | 5 workspace packages, nothing from the registry |
+| Tests | **207** | Including published RFC 6962 and RFC 8032 vectors |
 
 Capacity is not the constraint. A single hub process comfortably handles far
 more agent traffic than any early customer will generate.
@@ -37,9 +43,11 @@ more agent traffic than any early customer will generate.
 
 ---
 
-## Blocking: hosted service
+## The four blockers, and how each was closed
 
-Four things. Nothing here is research — all four are known work.
+Three were fixable outright. The second was not, by definition — so the work
+there was to make the review cheap and to reduce the risk it covers in the
+meantime.
 
 ### 1. The hub's signing keys live in its database
 
@@ -53,8 +61,32 @@ hub never sees them. This is the design paying off — the worst case is bounded
 Independent witnesses catch this, which is precisely why they exist — but
 defence-in-depth is not a substitute for key management.
 
-*Fix:* a KMS/HSM signer interface. The format only ever needs a `sign(bytes)`
-operation, so this is an adapter, not a redesign. **Estimate: days.**
+**CLOSED.** `packages/server/src/signer.js` puts signing behind a three-member
+interface — `{ kid, publicKey, async sign(digest) }` — with three backends:
+`local` (unchanged default), `command` (a KMS CLI, a PKCS#11 tool, `vault
+write` — anything that reads a digest on stdin), and `http` (a signing
+sidecar). Configured with `PROOFWIRE_SIGNER`, per role, so the witness key can
+live in different custody from the log key — which is what an independent
+witness *should* do.
+
+Three decisions worth noting:
+
+- **A misconfigured signer disables signing; it never falls back to a local
+  key.** Quietly minting a key nobody asked for would defeat the entire point
+  of moving to a KMS.
+- **Startup runs a real self-test** — a signature over a random digest,
+  verified against the configured public key. That catches a missing command,
+  a denied grant, the wrong key wired up, and an unexpected output encoding,
+  all at boot rather than at the first checkpoint hours later.
+- **A dead signer stops checkpoints and never stops ingest.** Receipts keep
+  being accepted and verified; only the tree-head signature pauses.
+
+Key rotation retires the old key and keeps it forever, so a checkpoint signed
+last year still verifies. `/.well-known/proofwire` publishes every key,
+retired ones included.
+
+*Remaining:* the vendor-specific wrapper scripts (AWS KMS, GCP KMS, Azure Key
+Vault) are one-file examples, not written yet.
 
 ### 2. Nobody independent has reviewed the cryptography
 
@@ -67,10 +99,42 @@ external reviewer exists to cover.
 For a product sold on cryptographic assurance, shipping unreviewed to paying
 customers would be selling the thing we haven't verified.
 
-*Fix:* commission a review of `packages/core` (roughly 1,500 lines, the part
-that matters) and **publish it unedited, findings and all**. That publication
-is also the strongest marketing asset this product can have.
-**Estimate: 3–6 weeks, mostly calendar time.**
+**STILL OPEN — and it cannot be closed from the inside.** What was done
+instead:
+
+**External ground truth.** `packages/core/test/vectors.test.js` now pins the
+implementation to published values rather than to itself:
+
+- The **RFC 6962 Certificate Transparency reference tree** — eight leaves of
+  increasing length, all nine prefix roots, with inclusion and consistency
+  proofs verified against those roots. Plus two anchors derivable from the
+  spec text with nothing to misremember: `MTH({}) = SHA-256("")` and
+  `MTH({""}) = SHA-256(0x00)`.
+- **RFC 8032 Ed25519 TEST 1 and TEST 2**, pinning the *signature bytes* — not
+  merely that sign-then-verify round-trips, which passes even when both halves
+  are wrong the same way. This also exercises the hand-assembled DER SPKI
+  header, the one place raw DER is built by hand.
+- **RFC 8785** ordering, number and escape rules.
+- **Randomized differential testing** across three structurally different
+  implementations of the same tree.
+
+This matters because every other test checks the implementation against
+itself, which catches inconsistency but not a shared misreading of the spec.
+It now provably produces the same bytes as every other RFC 6962 implementation
+— the property an auditor running someone else's verifier depends on.
+
+**A review brief.** [`AUDIT-BRIEF.md`](AUDIT-BRIEF.md) scopes the work to
+~1,500 lines, states the six falsifiable claims, and names the six places I am
+least confident — including the trailing-ones loop in `verifyConsistency` and
+whether the new cached-proof equivalence is total or merely true for the sizes
+tested. Naming them is the point: a reviewer should not spend their budget
+rediscovering my own doubts.
+
+**A disclosure policy.** [`SECURITY.md`](../SECURITY.md), with the in-scope
+claims and the documented non-issues stated up front.
+
+*Remaining:* commission the review and **publish it unedited**.
+**3–6 weeks, mostly calendar time.**
 
 ### 3. Backup and restore is untested
 
@@ -84,8 +148,33 @@ exactly the same failure either way. The runbook has to cover re-pushing from
 each agent's local log — and that path needs to be exercised, not just written
 down.
 
-*Fix:* automated backup, a tested restore runbook, and a drill.
-**Estimate: days.**
+**CLOSED**, and the exercise turned up something that had been stated
+imprecisely in the previous version of this document.
+
+`packages/server/src/backup.js` plus four commands: `backup` (via
+`VACUUM INTO`, so it is consistent without stopping writes and without the WAL
+sidecars that make a naive `cp` subtly wrong), `verify-backup`, `restore`, and
+`reconcile`. Scheduled backups with retention run in `serve`.
+
+**The finding:** a restored hub *cannot detect its own staleness*. Not an
+oversight and not fixable — the proof that the log once reached 18 entries
+lived in the data the restore discarded. A hub rolled back to 10 is perfectly
+self-consistent and has no way to know otherwise. Only a party holding later
+evidence can see it: the **agent**, whose local log is longer, or a **witness
+or auditor** holding a later checkpoint.
+
+So `reconcile` now reports `selfReferential` and says plainly that a clean
+result proves internal consistency and not currency, accepts
+`--against <checkpoints.json>` for external evidence, and distinguishes a
+**recoverable** gap (re-push from the agent — idempotent, and it self-heals)
+from a **divergent** one (the history was rewritten; no re-push fixes that).
+A restore is recorded in the hub's own hash-chained trail, which makes the
+claim contemporaneous without ever excusing the gap.
+
+Three other bugs the exercise found: `verifyBackup` opened backups read-write,
+running migrations and breaking the very digest that proved them intact;
+restores clobbered the previous database instead of moving it aside; WAL
+sidecars were left beside a restored file.
 
 ### 4. No password reset or invite flow
 
@@ -93,7 +182,25 @@ Users are created by an admin with a password set inline. There is no reset, no
 email, no invitation. That is fine for a bootstrap and unworkable for a real
 team the first time someone is locked out.
 
-*Fix:* invite tokens and password reset. **Estimate: days.**
+**CLOSED.** One table serves both, because they are the same object — a
+single-use, expiring capability to establish a credential — and two
+near-identical implementations would mean two places to get consumption wrong.
+
+Four rules, each closing a specific hole:
+
+- **The token is never stored, only its hash.** A database leak does not hand
+  over a working reset link for every account.
+- **Consumption is atomic**, so two racing submissions cannot both succeed.
+- **Issuing a reset invalidates outstanding ones**, so a link an attacker
+  already holds dies when the user asks for a new one.
+- **Setting a password revokes every session.** A reset exists because the
+  account may already be in someone else's hands.
+
+Requesting a reset answers identically whether or not the address exists.
+An invited account holds a membership an admin can see but cannot be signed
+in to. Delivery is a webhook (`PROOFWIRE_NOTIFY_URL`) rather than built-in
+SMTP, and the link is returned to the caller either way, so an admin is never
+stuck behind a mail integration.
 
 ---
 
@@ -141,14 +248,14 @@ reading it.
 **Success looks like:** HN front page, stars, and — more important — people
 actually running `pw verify`. Track that.
 
-### Stage 2 — self-hosted hub with design partners (4–8 weeks)
+### Stage 2 — self-hosted hub with design partners (ready now)
 
 Three to five teams run their *own* hub. They hold their own data; you hold
 none. Blockers #3 and #4 apply here (#1 and #2 do not, because they operate
 their own keys and accept their own risk knowingly).
 
-- [ ] Backup/restore runbook, drilled
-- [ ] Invite and password reset
+- [x] Backup/restore runbook, drilled
+- [x] Invite and password reset
 - [ ] Monitor-only mode — removes the "what if it blocks something real"
       objection entirely, and it is the single highest-leverage adoption fix
 - [ ] Weekly contact with every partner
@@ -188,6 +295,9 @@ Not everything is a caveat. These are done and tested, not aspirational:
 
 ## The honest one-line answer
 
-**Standalone: ship it in two weeks.** **Hosted: three to six months, gated on a
-published security review.** The order matters — the open-source launch is what
-earns the right to run the hosted one, and it is not a delay.
+**Standalone: ship it.** **Self-hosted hub: ready for design partners.**
+**Hosted service: gated on one thing — a published external review**, which is
+calendar time rather than engineering time.
+
+The order still matters. The open-source launch is what earns the right to run
+the hosted one, and it is not a delay.

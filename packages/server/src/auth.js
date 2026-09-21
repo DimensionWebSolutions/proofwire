@@ -1,5 +1,5 @@
 import { randomBytes, createHash, timingSafeEqual, scryptSync } from 'node:crypto';
-import { newId, now } from './db.js';
+import { newId, now, transact } from './db.js';
 import { StoreError } from './store.js';
 
 /**
@@ -404,5 +404,146 @@ export function requireLog(principal, logId) {
       'wrong_log',
       'this credential is pinned to a different log',
     );
+  }
+}
+
+/**
+ * Single-use, expiring capabilities: invitations and password resets.
+ *
+ * The same object serves both, because they are the same thing — a bearer
+ * capability to establish a credential, good once, for a bounded time. Two
+ * near-identical implementations would mean two places to get consumption
+ * wrong, and consumption is where these flows fail.
+ *
+ * Four rules, each closing a specific hole:
+ *
+ *   - **The token is never stored.** Only its hash. A database leak does not
+ *     hand the attacker a working reset link for every account.
+ *   - **Consumption is atomic.** Marked used in the same transaction that sets
+ *     the password, so two racing submissions cannot both succeed.
+ *   - **Issuing a reset invalidates outstanding ones.** Otherwise an old link
+ *     an attacker obtained stays live after the user asks for a new one.
+ *   - **Setting a password revokes every session.** A reset exists because
+ *     someone may have lost control of the account; leaving the attacker's
+ *     session alive defeats the entire point.
+ */
+export class Tokens {
+  /** @param {Auth} auth */
+  constructor(auth) {
+    this.auth = auth;
+    this.db = auth.db;
+  }
+
+  /**
+   * @param {object} args
+   * @param {'invite'|'reset'} args.kind
+   * @param {string} args.userId
+   * @param {string} [args.orgId]
+   * @param {string} [args.role]
+   * @param {string} [args.createdBy]
+   * @param {number} [args.hours]
+   * @returns {{ id: string, token: string, expiresAt: string }}
+   */
+  issue(args) {
+    // Invitations get days because they wait on a human; resets get an hour,
+    // because a long-lived reset link is a long-lived account takeover.
+    const hours = args.hours ?? (args.kind === 'invite' ? 72 : 1);
+    const token = randomBytes(32).toString('base64url');
+    const id = newId('session');
+    const expiresAt = new Date(Date.now() + hours * 3_600_000).toISOString();
+
+    return transact(this.db, () => {
+      // A newly issued token supersedes any outstanding one of the same kind.
+      this.db
+        .prepare(
+          `UPDATE tokens SET used_at = ?
+           WHERE user_id = ? AND kind = ? AND used_at IS NULL`,
+        )
+        .run(now(), args.userId, args.kind);
+
+      this.db
+        .prepare(
+          `INSERT INTO tokens(id, kind, token_hash, user_id, org_id, role, created_at, created_by, expires_at)
+           VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          id, args.kind, hashSecret(token), args.userId, args.orgId ?? null,
+          args.role ?? null, now(), args.createdBy ?? null, expiresAt,
+        );
+
+      return { id, token, expiresAt };
+    });
+  }
+
+  /**
+   * Look a token up without consuming it — for rendering the form.
+   *
+   * @param {string} token
+   * @param {'invite'|'reset'} [kind]
+   * @returns {object|null}
+   */
+  peek(token, kind) {
+    if (typeof token !== 'string' || token === '') return null;
+    const row = this.db
+      .prepare(
+        `SELECT t.*, u.email FROM tokens t JOIN users u ON u.id = t.user_id
+         WHERE t.token_hash = ?`,
+      )
+      .get(hashSecret(token));
+    if (!row) return null;
+    if (kind && row.kind !== kind) return null;
+    if (row.used_at) return null;
+    if (row.expires_at <= now()) return null;
+    return row;
+  }
+
+  /**
+   * Consume a token and set the password.
+   *
+   * @param {object} args
+   * @param {string} args.token
+   * @param {string} args.password
+   * @param {'invite'|'reset'} [args.kind]
+   * @returns {{ user: object, orgId: string|null }}
+   */
+  redeem(args) {
+    if (typeof args.password !== 'string' || args.password.length < 12) {
+      throw new StoreError(
+        400,
+        'weak_password',
+        'a password must be at least 12 characters',
+      );
+    }
+
+    return transact(this.db, () => {
+      // Re-read inside the transaction: between peek and redeem the token may
+      // have been used by a concurrent request.
+      const row = this.peek(args.token, args.kind);
+      if (!row) {
+        throw new StoreError(
+          400,
+          'invalid_token',
+          'this link is invalid, already used, or has expired',
+        );
+      }
+
+      this.db.prepare('UPDATE tokens SET used_at = ? WHERE id = ?').run(now(), row.id);
+      this.db
+        .prepare('UPDATE users SET password_hash = ? WHERE id = ?')
+        .run(hashPassword(args.password), row.user_id);
+
+      // Every existing session for this user ends. A reset exists because the
+      // account may already be in someone else's hands.
+      this.db
+        .prepare('UPDATE sessions SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL')
+        .run(now(), row.user_id);
+
+      if (row.org_id && row.role) {
+        this.auth.addMember(row.org_id, row.user_id, row.role);
+      }
+
+      const user = this.db.prepare('SELECT * FROM users WHERE id = ?').get(row.user_id);
+      return { user, orgId: row.org_id };
+    });
   }
 }

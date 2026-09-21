@@ -13,6 +13,7 @@ import {
   GENESIS_PREV,
   buildCheckpoint,
   signCheckpoint,
+  signCheckpointWith,
   identityFromPem,
   generateIdentity,
 } from '@proofwire/core';
@@ -504,13 +505,18 @@ export class Store {
   // ── checkpoints ───────────────────────────────────────────────────────
 
   /**
-   * Sign the current tree head with the hub's key.
+   * Sign the current tree head.
+   *
+   * Async because the signer may be a KMS. The signature is produced *before*
+   * anything is written, so a signer failure leaves no half-formed checkpoint
+   * row claiming a root nobody attested to.
    *
    * @param {string} orgId
    * @param {string} logId
-   * @param {import('@proofwire/core').Identity} identity
+   * @param {import('./signer.js').Signer} signer
+   * @returns {Promise<import('@proofwire/core').Checkpoint>}
    */
-  checkpoint(orgId, logId, identity) {
+  async checkpoint(orgId, logId, signer) {
     const log = this.log(orgId, logId);
     if (!log) throw new StoreError(404, 'no_such_log', 'no such log in this organization');
     if (log.size === 0) {
@@ -528,18 +534,25 @@ export class Store {
       root: log.root,
       head: log.head,
     });
-    const cp = signCheckpoint(identity, body, 'log');
+    const cp = await signCheckpointWith(signer, body, 'log');
 
     this.db
       .prepare(
         `INSERT INTO checkpoints(id, log_id, org_id, size, root, head, ts, body, sigs, witness_count)
-         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 0)`,
+         VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+         ON CONFLICT(log_id, size) DO NOTHING`,
       )
       .run(
         newId('checkpoint'), log.id, log.org_id, body.size, body.root, body.head,
         body.ts, canonicalize(body), canonicalize(cp.sigs),
       );
-    return cp;
+
+    // Another request may have checkpointed the same size while we were
+    // waiting on the signer. Whichever landed first is the one that counts.
+    const stored = this.db
+      .prepare('SELECT * FROM checkpoints WHERE log_id = ? AND size = ?')
+      .get(log.id, log.size);
+    return stored ? hydrateCheckpoint(stored) : cp;
   }
 
   /**
@@ -841,6 +854,9 @@ export class Store {
    * @returns {string|null}
    */
   publicKeyFor(orgId, kid) {
+    // Deliberately not filtered by retired_at: a signature made before a
+    // rotation is still a valid signature, and a verifier must be able to
+    // check it.
     const server = this.db.prepare('SELECT public_key FROM server_keys WHERE kid = ?').get(kid);
     if (server) return server.public_key;
 
@@ -856,24 +872,103 @@ export class Store {
   }
 
   /**
+   * The current, un-retired key for a role, if there is one.
+   *
+   * @param {'hub'|'witness'} role
+   * @returns {object|null}
+   */
+  activeServerKey(role) {
+    return (
+      this.db
+        .prepare(
+          `SELECT * FROM server_keys WHERE role = ? AND retired_at IS NULL
+           ORDER BY created_at DESC LIMIT 1`,
+        )
+        .get(role) ?? null
+    );
+  }
+
+  /**
+   * Record a server key. `privatePem` is null for every backend except local —
+   * with an external signer the private half is, by construction, not ours.
+   *
+   * @param {object} args
+   * @param {string} args.kid
+   * @param {string} args.role
+   * @param {string} args.publicKey
+   * @param {string|null} args.privatePem
+   * @param {string} [args.backend]
+   */
+  recordServerKey(args) {
+    const existing = this.db.prepare('SELECT kid FROM server_keys WHERE kid = ?').get(args.kid);
+    if (existing) return;
+
+    // A new key for a role retires the old one rather than competing with it,
+    // so "which key is current" is never ambiguous.
+    this.db
+      .prepare('UPDATE server_keys SET retired_at = ? WHERE role = ? AND retired_at IS NULL')
+      .run(now(), args.role);
+
+    this.db
+      .prepare(
+        `INSERT INTO server_keys(kid, role, public_key, private_pem, backend, created_at)
+         VALUES(?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        args.kid, args.role, args.publicKey, args.privatePem ?? null,
+        args.backend ?? (args.privatePem ? 'local' : 'external'), now(),
+      );
+  }
+
+  /**
+   * Every server key that has ever signed, current and retired.
+   *
+   * Retired keys are never dropped. A checkpoint signed last year by a key
+   * rotated since must still verify, or rotating would quietly invalidate the
+   * history it was meant to protect.
+   *
+   * @returns {object[]}
+   */
+  serverKeys() {
+    return this.db.prepare('SELECT * FROM server_keys ORDER BY created_at ASC').all();
+  }
+
+  /**
+   * True when any server key's private half is sitting in this database.
+   *
+   * Surfaced in the console and in `hub check`, because an operator who
+   * believes they moved to a KMS and did not should find out from us.
+   *
+   * @returns {boolean}
+   */
+  holdsPrivateKeys() {
+    return (
+      this.db
+        .prepare('SELECT count(*) AS n FROM server_keys WHERE private_pem IS NOT NULL')
+        .get().n > 0
+    );
+  }
+
+  /**
    * The hub's own signing identity, created on first use.
+   *
+   * Retained for the local backend and for tests; the hub itself now goes
+   * through a `Signer`, which may hold no key material at all.
    *
    * @param {'hub'|'witness'} role
    * @returns {import('@proofwire/core').Identity}
    */
   serverIdentity(role) {
-    const row = this.db
-      .prepare('SELECT * FROM server_keys WHERE role = ? AND retired_at IS NULL ORDER BY created_at DESC LIMIT 1')
-      .get(role);
-    if (row) return identityFromPem(row.private_pem);
+    const row = this.activeServerKey(role);
+    if (row?.private_pem) return identityFromPem(row.private_pem);
 
     const { identity, privateKeyPem } = generateIdentity();
-    this.db
-      .prepare(
-        `INSERT INTO server_keys(kid, role, public_key, private_pem, created_at)
-         VALUES(?, ?, ?, ?, ?)`,
-      )
-      .run(identity.kid, role, identity.publicKey, privateKeyPem, now());
+    this.recordServerKey({
+      kid: identity.kid,
+      role,
+      publicKey: identity.publicKey,
+      privatePem: privateKeyPem,
+    });
     return identity;
   }
 }

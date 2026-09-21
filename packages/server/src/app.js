@@ -12,7 +12,8 @@ import {
 } from '@proofwire/core';
 import { openDatabase, newId, now, transact } from './db.js';
 import { Store, StoreError } from './store.js';
-import { Auth, requireScope, requireLog, scopesForRole, verifyPassword, SCOPES, ROLES } from './auth.js';
+import { signerFor, selfTest } from './signer.js';
+import { Auth, Tokens, requireScope, requireLog, scopesForRole, verifyPassword, SCOPES, ROLES } from './auth.js';
 import {
   Router,
   RateLimiter,
@@ -60,9 +61,17 @@ export class Hub {
     this.db = openDatabase(this.config.database);
     this.store = new Store(this.db);
     this.auth = new Auth(this.store);
+    this.tokens = new Tokens(this.auth);
 
-    this.hubIdentity = this.store.serverIdentity('hub');
-    this.witnessIdentity = this.store.serverIdentity('witness');
+    // Signing goes through a `Signer`, which for a KMS or HSM backend holds no
+    // key material at all. `local` remains the default so nothing breaks for an
+    // existing self-hosted deployment.
+    this.hubSigner = signerFor(this.store, 'hub', config.env ?? process.env);
+    this.witnessSigner = signerFor(this.store, 'witness', config.env ?? process.env);
+
+    // Kept for compatibility with callers that want the identity shape.
+    this.hubIdentity = { kid: this.hubSigner.kid, publicKey: this.hubSigner.publicKey };
+    this.witnessIdentity = { kid: this.witnessSigner.kid, publicKey: this.witnessSigner.publicKey };
 
     this.limiters = {
       ingest: new RateLimiter(this.config.ingestRate),
@@ -173,8 +182,17 @@ export class Hub {
     r.get('/.well-known/proofwire', () => ({
       service: 'proofwire-hub',
       version: '0.2.0',
-      hub: { kid: this.hubIdentity.kid, publicKey: this.hubIdentity.publicKey },
-      witness: { kid: this.witnessIdentity.kid, publicKey: this.witnessIdentity.publicKey },
+      hub: { kid: this.hubSigner.kid, publicKey: this.hubSigner.publicKey },
+      witness: { kid: this.witnessSigner.kid, publicKey: this.witnessSigner.publicKey },
+      // Every key that has ever signed here, including retired ones. A
+      // signature made before a rotation stays verifiable; without this, a
+      // rotation would quietly invalidate the history it was meant to protect.
+      keys: this.store.serverKeys().map((k) => ({
+        kid: k.kid,
+        role: k.role,
+        publicKey: k.public_key,
+        retiredAt: k.retired_at,
+      })),
       receiptVersion: 1,
     }));
 
@@ -295,12 +313,14 @@ export class Hub {
         this._sinceCheckpoint += result.accepted;
         if (this.config.checkpointEvery > 0 && this._sinceCheckpoint >= this.config.checkpointEvery) {
           this._sinceCheckpoint = 0;
-          try {
-            this.store.checkpoint(ctx.principal.orgId, log.id, this.hubIdentity);
-          } catch {
-            // A checkpoint is an optimisation of detection, not a precondition
-            // for storing receipts. Never fail an ingest over one.
-          }
+          // A checkpoint is an optimisation of detection, not a precondition
+          // for storing receipts — and with an external signer it is a network
+          // call. Never make an ingest wait for one, and never fail one over it.
+          this.store.checkpoint(ctx.principal.orgId, log.id, this.hubSigner).catch((err) => {
+            console.error(
+              JSON.stringify({ level: 'warn', event: 'checkpoint.failed', log: log.slug, message: err.message }),
+            );
+          });
         }
       }
       return result;
@@ -368,10 +388,10 @@ export class Hub {
     });
 
     // ── checkpoints & witnessing ────────────────────────────────────────
-    r.post('/v1/logs/:log/checkpoint', (ctx) => {
+    r.post('/v1/logs/:log/checkpoint', async (ctx) => {
       requireScope(ctx.principal, 'logs:write');
       const log = this._log(ctx.principal, ctx.params.log);
-      return this.store.checkpoint(ctx.principal.orgId, log.id, this.hubIdentity);
+      return this.store.checkpoint(ctx.principal.orgId, log.id, this.hubSigner);
     });
 
     r.get('/v1/logs/:log/checkpoints', (ctx) => {
@@ -389,7 +409,7 @@ export class Hub {
      * root at a size it has already seen. Those two rules are what make a split
      * view impossible without the witness's complicity.
      */
-    r.post('/v1/witness/cosign', (ctx) => {
+    r.post('/v1/witness/cosign', async (ctx) => {
       requireScope(ctx.principal, 'witness:sign');
       const checkpoint = ctx.body?.checkpoint;
       const proof = ctx.body?.consistencyProof;
@@ -400,10 +420,20 @@ export class Hub {
       const { body } = checkpoint;
       const logKey = `${ctx.principal.orgId}:${body.log}`;
 
-      return transact(this.db, () => {
+      // Validate and *claim* the position in one transaction, then sign
+      // outside it.
+      //
+      // Signing may be a network call to a KMS. If validation and the claim
+      // were not atomic, two concurrent requests offering different roots at
+      // the same size could both pass validation while the other was still
+      // signing, and the witness would attest to two histories — the precise
+      // thing it exists to refuse. Claiming first also fails in the safe
+      // direction: if signing then errors, the position is already taken, so a
+      // later *different* root at that size is still refused.
+      transact(this.db, () => {
         const prior = this.db
           .prepare('SELECT * FROM witness_state WHERE witness_kid = ? AND log_id = ?')
-          .get(this.witnessIdentity.kid, logKey);
+          .get(this.witnessSigner.kid, logKey);
 
         if (prior) {
           if (body.size < prior.size) {
@@ -450,13 +480,6 @@ export class Hub {
           }
         }
 
-        const sig = {
-          role: /** @type {const} */ ('witness'),
-          kid: this.witnessIdentity.kid,
-          sig: signBytes(this.witnessIdentity, checkpointDigest(body)),
-          ts: now(),
-        };
-
         this.db
           .prepare(
             `INSERT INTO witness_state(witness_kid, log_id, size, root, updated_at)
@@ -464,25 +487,36 @@ export class Hub {
              ON CONFLICT(witness_kid, log_id) DO UPDATE SET
                size = excluded.size, root = excluded.root, updated_at = excluded.updated_at`,
           )
-          .run(this.witnessIdentity.kid, logKey, body.size, body.root, now());
-
-        try {
-          const local = this.store.logBySlug(ctx.principal.orgId, body.log);
-          if (local) {
-            this.store.addWitnessSignature(ctx.principal.orgId, local.id, body.size, sig);
-          }
-        } catch {
-          // Witnessing a log this hub does not itself host is a legitimate
-          // case — the signature is still returned to the caller.
-        }
-
-        return { signature: sig, witness: { kid: this.witnessIdentity.kid, publicKey: this.witnessIdentity.publicKey } };
+          .run(this.witnessSigner.kid, logKey, body.size, body.root, now());
       });
+
+      const sig = {
+        role: /** @type {const} */ ('witness'),
+        kid: this.witnessSigner.kid,
+        sig: await this.witnessSigner.sign(checkpointDigest(body)),
+        ts: now(),
+      };
+
+      try {
+        const local = this.store.logBySlug(ctx.principal.orgId, body.log);
+        if (local) {
+          this.store.addWitnessSignature(ctx.principal.orgId, local.id, body.size, sig);
+        }
+      } catch {
+        // Witnessing a log this hub does not itself host is a legitimate
+        // case — the signature is still returned to the caller.
+      }
+
+      return {
+        signature: sig,
+        witness: { kid: this.witnessSigner.kid, publicKey: this.witnessSigner.publicKey },
+      };
     });
 
     r.get('/v1/witness/key', () => ({
-      kid: this.witnessIdentity.kid,
-      publicKey: this.witnessIdentity.publicKey,
+      kid: this.witnessSigner.kid,
+      publicKey: this.witnessSigner.publicKey,
+      backend: this.witnessSigner.kind,
     }));
 
     // ── policies ────────────────────────────────────────────────────────
@@ -737,6 +771,118 @@ export class Hub {
       return { id: ctx.params.id, revoked: true };
     });
 
+    /**
+     * Invite someone. Returns the link rather than sending it: mail delivery
+     * is an integration, and a hub that silently depends on SMTP being right
+     * fails in a way nobody sees until an invitation never arrives.
+     */
+    r.post('/v1/invites', (ctx) => {
+      requireScope(ctx.principal, 'admin');
+      const { email, role } = ctx.body ?? {};
+      if (!email || !role) {
+        throw new StoreError(400, 'missing_fields', 'email and role are required');
+      }
+      if (!ROLES.includes(String(role))) {
+        throw new StoreError(400, 'bad_role', `role must be one of ${ROLES.join(', ')}`);
+      }
+
+      const user =
+        this.auth.userByEmail(String(email)) ?? this.auth.createUser({ email: String(email) });
+
+      // The membership is created now, not on redemption, so an admin can see
+      // who has been invited and to what. It grants nothing on its own: the
+      // account has no password, so it cannot be signed in to, and the
+      // invitation link is the only way to set one.
+      this.auth.addMember(ctx.principal.orgId, user.id, String(role));
+
+      const issued = this.tokens.issue({
+        kind: 'invite',
+        userId: user.id,
+        orgId: ctx.principal.orgId,
+        role: String(role),
+        createdBy: ctx.principal.label,
+      });
+
+      this.store.recordEvent({
+        orgId: ctx.principal.orgId,
+        actor: ctx.principal.label,
+        actorKind: ctx.principal.kind,
+        action: 'member.invite',
+        subject: user.email,
+        meta: { role, expiresAt: issued.expiresAt },
+      });
+
+      const link = `${this._publicUrl(ctx)}/accept?token=${encodeURIComponent(issued.token)}`;
+      this._deliver({ kind: 'invite', email: user.email, link, expiresAt: issued.expiresAt });
+
+      return {
+        email: user.email,
+        role,
+        expiresAt: issued.expiresAt,
+        link,
+        note: 'this link is shown once and grants account access — send it over a channel you trust',
+      };
+    });
+
+    /**
+     * Ask for a password reset.
+     *
+     * Always answers the same way, whether or not the address exists. A
+     * different response for an unknown address turns this endpoint into an
+     * account enumeration oracle.
+     */
+    r.post('/v1/auth/reset', (ctx) => {
+      const email = String(ctx.body?.email ?? '');
+      const user = email ? this.auth.userByEmail(email) : null;
+
+      if (user) {
+        const issued = this.tokens.issue({ kind: 'reset', userId: user.id });
+        const link = `${this._publicUrl(ctx)}/reset?token=${encodeURIComponent(issued.token)}`;
+        this._deliver({ kind: 'reset', email: user.email, link, expiresAt: issued.expiresAt });
+
+        const orgs = this.auth.orgsFor(user.id);
+        for (const org of orgs) {
+          this.store.recordEvent({
+            orgId: org.id,
+            actor: user.email,
+            actorKind: 'user',
+            action: 'password.reset-requested',
+            subject: user.email,
+          });
+        }
+      }
+
+      return { ok: true, note: 'if that address has an account, a reset link has been issued' };
+    });
+
+    /** Consume an invite or reset token and set a password. */
+    r.post('/v1/auth/redeem', (ctx) => {
+      const { token, password } = ctx.body ?? {};
+      if (!token) throw new StoreError(400, 'missing_token', 'token is required');
+
+      const { user, orgId } = this.tokens.redeem({
+        token: String(token),
+        password: String(password ?? ''),
+      });
+
+      for (const org of this.auth.orgsFor(user.id)) {
+        this.store.recordEvent({
+          orgId: org.id,
+          actor: user.email,
+          actorKind: 'user',
+          action: 'password.set',
+          subject: user.email,
+        });
+      }
+
+      const session = this.auth.createSession(user.id);
+      ctx.res.setHeader('set-cookie', [
+        cookie('pw_session', session.token, { maxAge: 14 * 86400 }),
+        ...(orgId ? [cookie('pw_org', orgId, { maxAge: 14 * 86400 })] : []),
+      ]);
+      return { ok: true, email: user.email };
+    });
+
     r.get('/v1/members', (ctx) => {
       requireScope(ctx.principal, 'admin');
       return { members: this.auth.members(ctx.principal.orgId), roles: ROLES };
@@ -780,9 +926,59 @@ export class Hub {
     });
 
     // ── console ─────────────────────────────────────────────────────────
-    for (const page of ['/', '/logs/:log', '/approvals', '/policies', '/settings', '/events', '/login']) {
+    for (const page of [
+      '/', '/logs/:log', '/approvals', '/policies', '/settings', '/events',
+      '/login', '/forgot', '/accept', '/reset',
+    ]) {
       r.get(page, (ctx) => renderConsole(this, ctx, page));
     }
+
+    // Both flows post here. The page decides its own wording; the handler is
+    // the same, because setting a password from a capability is one operation.
+    for (const route of ['/accept', '/reset']) {
+      r.post(route, (ctx) => {
+        const token = String(ctx.body?.token ?? '');
+        const password = String(ctx.body?.password ?? '');
+        const confirm = String(ctx.body?.confirm ?? '');
+
+        if (password !== confirm) {
+          return { __redirect: `${route}?token=${encodeURIComponent(token)}&e=mismatch` };
+        }
+        try {
+          const { user, orgId } = this.tokens.redeem({ token, password });
+          for (const org of this.auth.orgsFor(user.id)) {
+            this.store.recordEvent({
+              orgId: org.id, actor: user.email, actorKind: 'user',
+              action: 'password.set', subject: user.email, meta: { via: 'console' },
+            });
+          }
+          const session = this.auth.createSession(user.id);
+          return {
+            __redirect: '/',
+            cookies: [
+              cookie('pw_session', session.token, { maxAge: 14 * 86400 }),
+              ...(orgId ? [cookie('pw_org', orgId, { maxAge: 14 * 86400 })] : []),
+            ],
+          };
+        } catch (err) {
+          const code = err instanceof StoreError ? err.code : 'invalid_token';
+          return { __redirect: `${route}?token=${encodeURIComponent(token)}&e=${code}` };
+        }
+      });
+    }
+
+    r.post('/forgot', (ctx) => {
+      const email = String(ctx.body?.email ?? '');
+      const user = email ? this.auth.userByEmail(email) : null;
+      if (user) {
+        const issued = this.tokens.issue({ kind: 'reset', userId: user.id });
+        const link = `${this._publicUrl(ctx)}/reset?token=${encodeURIComponent(issued.token)}`;
+        this._deliver({ kind: 'reset', email: user.email, link, expiresAt: issued.expiresAt });
+      }
+      // Same page either way: the response must not reveal whether the
+      // address is registered.
+      return { __redirect: '/forgot?sent=1' };
+    });
 
     r.post('/login', (ctx) => {
       const email = String(ctx.body?.email ?? '');
@@ -884,6 +1080,53 @@ export class Hub {
         if (row && row.status !== 'pending') finish();
       }, 1000);
       const timer = setTimeout(finish, ms);
+    });
+  }
+
+  /**
+   * The base URL to put in an invitation or reset link.
+   *
+   * Configured first, because behind a proxy the Host header is whatever the
+   * proxy passes through and a link built from it can point somewhere useless.
+   *
+   * @param {import('./http.js').Ctx} ctx
+   * @returns {string}
+   */
+  _publicUrl(ctx) {
+    if (this.config.publicUrl) return this.config.publicUrl.replace(/\/+$/, '');
+    const host = ctx.req.headers.host ?? `localhost:${this.config.port}`;
+    return `http${process.env.PROOFWIRE_INSECURE_COOKIES === '1' ? '' : 's'}://${host}`;
+  }
+
+  /**
+   * Hand a link to whatever actually sends mail.
+   *
+   * Deliberately a webhook rather than built-in SMTP: every organisation
+   * already has a way to send transactional mail, and a hub that ships its own
+   * is one more thing to configure, monitor, and get onto an allowlist. A
+   * delivery failure is logged and never fails the request — the link is
+   * returned to the caller either way, so an admin is never stuck.
+   *
+   * @param {{ kind: string, email: string, link: string, expiresAt: string }} payload
+   */
+  _deliver(payload) {
+    const url = process.env.PROOFWIRE_NOTIFY_URL;
+    if (!url) return;
+
+    fetch(url, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...(process.env.PROOFWIRE_NOTIFY_TOKEN
+          ? { authorization: `Bearer ${process.env.PROOFWIRE_NOTIFY_TOKEN}` }
+          : {}),
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(10_000),
+    }).catch((err) => {
+      console.error(
+        JSON.stringify({ level: 'warn', event: 'notify.failed', kind: payload.kind, message: err.message }),
+      );
     });
   }
 

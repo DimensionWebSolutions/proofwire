@@ -52,7 +52,9 @@ export {
   buildCheckpoint,
   checkpointDigest,
   signCheckpoint,
+  signCheckpointWith,
   cosign,
+  cosignWith,
   verifyCheckpoint,
 } from './checkpoint.js';
 export { ProofLog, verifyBundle } from './log.js';

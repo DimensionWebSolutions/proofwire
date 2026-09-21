@@ -107,7 +107,13 @@ key, so it cannot forge a receipt — and it is not load-bearing either: an agen
 whose hub is unreachable keeps running, keeps recording locally, and ships the
 backlog when it returns.
 
-Full deployment and operations guide: [`docs/HUB.md`](docs/HUB.md).
+Keys can live in a KMS or HSM rather than the hub's database
+(`PROOFWIRE_SIGNER`), backups and restores have a drilled runbook, and
+invitations and password resets are built in.
+
+Full deployment and operations guide: [`docs/HUB.md`](docs/HUB.md) · readiness
+assessment: [`docs/GO-LIVE.md`](docs/GO-LIVE.md) · for reviewers:
+[`docs/AUDIT-BRIEF.md`](docs/AUDIT-BRIEF.md).
 
 ---
 
@@ -306,9 +312,13 @@ than none:
   through it. An agent with a second, unwrapped path to the same API leaves no
   receipt. Route tools through the proxy and treat unwrapped credentials as the
   hole they are.
-- **A hub's own signing keys live in its database** in `0.2.0`. A KMS/HSM
-  backend is the next piece of work; until then, treat that database as key
-  material.
+- **The cryptography has not been reviewed by anyone independent.** It is
+  checked against published RFC 6962 and RFC 8032 vectors rather than only
+  against itself, but that is not the same thing. See
+  [`docs/AUDIT-BRIEF.md`](docs/AUDIT-BRIEF.md).
+- **A restored hub cannot detect its own staleness.** The evidence was in the
+  data the restore discarded; only an agent or an auditor holding later
+  evidence can see the gap. Re-push from every agent after a restore.
 - **It cannot stop an attacker with the signing key from writing false
   receipts going forward.** It *can* stop them rewriting the past, once a
   checkpoint has been witnessed. Keep the key in a KMS or HSM in production.
@@ -327,10 +337,11 @@ not ready for production.
 ## Status
 
 `0.2.0` — cryptography, policy engine, proxy, CLI, and the multi-tenant hub are
-complete and covered by **145 tests**: exhaustive Merkle proof verification for
-every tree size up to 64 and every `(m, n)` consistency pair up to 48, plus
-end-to-end tests that run a real agent through a real proxy against a real hub
-over HTTP.
+complete and covered by **207 tests**: the published RFC 6962 Certificate
+Transparency reference tree and RFC 8032 Ed25519 vectors, exhaustive Merkle
+proof verification for every tree size up to 128 and every `(m, n)` consistency
+pair up to 48, and end-to-end tests that run a real agent through a real proxy
+against a real hub over HTTP.
 
 ```bash
 npm test

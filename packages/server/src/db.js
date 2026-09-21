@@ -286,6 +286,54 @@ const MIGRATIONS = [
       CREATE UNIQUE INDEX idx_logs_canonical ON logs(org_id, canonical);
     `,
   },
+  {
+    id: '005_external_signers',
+    sql: `
+      -- With an external signer the hub holds only the public half, so
+      -- private_pem must be nullable. SQLite cannot relax a NOT NULL in place,
+      -- hence the rebuild.
+      CREATE TABLE server_keys_new (
+        kid         TEXT PRIMARY KEY,
+        role        TEXT NOT NULL,
+        public_key  TEXT NOT NULL,
+        private_pem TEXT,
+        backend     TEXT NOT NULL DEFAULT 'local',
+        created_at  TEXT NOT NULL,
+        retired_at  TEXT
+      );
+      INSERT INTO server_keys_new(kid, role, public_key, private_pem, backend, created_at, retired_at)
+        SELECT kid, role, public_key, private_pem, 'local', created_at, retired_at FROM server_keys;
+      DROP TABLE server_keys;
+      ALTER TABLE server_keys_new RENAME TO server_keys;
+
+      -- Retired keys are kept forever: a checkpoint signed by a key that has
+      -- since been rotated must stay verifiable, or rotation would silently
+      -- invalidate history.
+      CREATE INDEX idx_server_keys_role ON server_keys(role, retired_at);
+    `,
+  },
+  {
+    id: '006_invites_and_resets',
+    sql: `
+      -- One table for both invitations and password resets: they are the same
+      -- object — a single-use, expiring capability to establish a credential —
+      -- and splitting them would duplicate every consumption rule, which is
+      -- exactly where this kind of flow goes wrong.
+      CREATE TABLE tokens (
+        id          TEXT PRIMARY KEY,
+        kind        TEXT NOT NULL,          -- 'invite' | 'reset'
+        token_hash  TEXT NOT NULL UNIQUE,
+        user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        org_id      TEXT REFERENCES orgs(id) ON DELETE CASCADE,
+        role        TEXT,
+        created_at  TEXT NOT NULL,
+        created_by  TEXT,
+        expires_at  TEXT NOT NULL,
+        used_at     TEXT
+      );
+      CREATE INDEX idx_tokens_user ON tokens(user_id, kind, used_at);
+    `,
+  },
 ];
 
 /**
@@ -331,6 +379,25 @@ export function openDatabase(file) {
   }
 
   return db;
+}
+
+/**
+ * Open a database without touching it.
+ *
+ * Opening a SQLite file read-write is not a passive act: it applies
+ * migrations, writes PRAGMAs, and can leave WAL sidecars behind. Doing that to
+ * a *backup* changes its bytes and invalidates the very digest that proves it
+ * is intact — which is how backup verification managed to fail every backup it
+ * had just taken.
+ *
+ * Use this for anything being inspected rather than operated: backups,
+ * forensic copies, an auditor's snapshot.
+ *
+ * @param {string} file
+ * @returns {DatabaseSync}
+ */
+export function openReadOnly(file) {
+  return new DatabaseSync(file, { readOnly: true });
 }
 
 /**

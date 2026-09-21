@@ -2,6 +2,10 @@
 import { randomBytes } from 'node:crypto';
 import { Hub, DEFAULT_CONFIG } from './app.js';
 import { Auth } from './auth.js';
+import { selfTest } from './signer.js';
+import {
+  cmdBackup, cmdVerifyBackup, cmdRestore, cmdReconcile, scheduleBackups,
+} from './backup-cmds.js';
 
 /**
  * Hub entry point.
@@ -46,8 +50,28 @@ async function serve() {
   console.error(B('  Proofwire hub') + DIM('  0.2.0'));
   console.error(DIM(`  ${url}`));
   console.error(DIM(`  db       ${hub.config.database}`));
-  console.error(DIM(`  hub key  ${hub.hubIdentity.kid}`));
-  console.error(DIM(`  witness  ${hub.witnessIdentity.kid}`));
+  console.error(DIM(`  hub key  ${hub.hubSigner.kid}  [${hub.hubSigner.kind}]`));
+  console.error(DIM(`  witness  ${hub.witnessSigner.kid}  [${hub.witnessSigner.kind}]`));
+
+  // Prove both signers work now, with a real signature verified against the
+  // configured public key. That catches a missing command, a denied KMS grant,
+  // the wrong key wired up, and an unexpected output encoding — all at boot,
+  // rather than at the first checkpoint hours later.
+  for (const [role, signer] of [['hub', hub.hubSigner], ['witness', hub.witnessSigner]]) {
+    const res = await selfTest(signer);
+    if (!res.ok) {
+      console.error(RED(`  ${role} signer is not usable: ${res.error}`));
+      console.error(DIM('  Receipts will still be accepted and verified; checkpoints will not be signed.'));
+    }
+  }
+
+  if (hub.store.holdsPrivateKeys()) {
+    console.error('');
+    console.error(
+      DIM('  note: a signing key is stored in this database. For a hosted deployment set'),
+    );
+    console.error(DIM('        PROOFWIRE_SIGNER=command|http so key material stays out of it.'));
+  }
   console.error('');
 
   // A hub that never re-reads its own storage is taking itself at its word.
@@ -74,6 +98,12 @@ async function serve() {
       }
     }, interval * 60_000);
     timer.unref();
+  }
+
+  if (scheduleBackups(hub.config.database)) {
+    console.error(
+      DIM(`  backups  every ${process.env.PROOFWIRE_BACKUP_HOURS ?? 6}h to ${process.env.PROOFWIRE_BACKUP_DIR}`),
+    );
   }
 
   for (const signal of ['SIGINT', 'SIGTERM']) {
@@ -183,7 +213,15 @@ async function check() {
 }
 
 const command = process.argv[2] ?? 'serve';
-const COMMANDS = { serve, bootstrap, check };
+const COMMANDS = {
+  serve,
+  bootstrap,
+  check,
+  backup: cmdBackup,
+  'verify-backup': cmdVerifyBackup,
+  restore: cmdRestore,
+  reconcile: cmdReconcile,
+};
 
 if (!COMMANDS[command]) {
   console.error(`unknown command "${command}" — try: ${Object.keys(COMMANDS).join(', ')}`);

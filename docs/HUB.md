@@ -78,7 +78,13 @@ edit is one more thing to get wrong in a container.
 | `PROOFWIRE_SELFCHECK_MINUTES` | `60` | Re-verify every stored log on this interval. |
 | `PROOFWIRE_APPROVAL_TTL` | `900` | Seconds before an undecided escalation expires. |
 | `PROOFWIRE_ACCESS_LOG` | on | Set `off` to silence per-request JSON logs. |
-| `PROOFWIRE_INSECURE_COOKIES` | unset | Drops `Secure` on session cookies. Local development only. |
+| `PROOFWIRE_INSECURE_COOKIES` | unset | Drops `Secure` on session cookies and suppresses HSTS. Local development only. |
+| `PROOFWIRE_SIGNER` | `local` | `local`, `command`, or `http`. See **Keys** below. |
+| `PROOFWIRE_BACKUP_DIR` | unset | Enables scheduled backups. |
+| `PROOFWIRE_BACKUP_HOURS` | `6` | |
+| `PROOFWIRE_BACKUP_KEEP` | `14` | Snapshots retained before pruning. |
+| `PROOFWIRE_NOTIFY_URL` | unset | Webhook for invitation and reset links. |
+| `PROOFWIRE_PUBLIC_URL` | unset | Base URL for those links. Set it behind a proxy. |
 
 ### On `PROOFWIRE_TRUST_PROXY`
 
@@ -86,6 +92,109 @@ edit is one more thing to get wrong in a container.
 honouring it lets anyone evade the per-address rate limit by inventing an
 address. Turn it on only when something you operate is guaranteed to overwrite
 it.
+
+---
+
+## Keys
+
+By default the hub generates its own Ed25519 keys and stores them in its
+database. That is fine for development and for a self-hosted hub whose operator
+accepts the risk knowingly. **It is not what a hosted service should run**, and
+the hub says so on every startup.
+
+### Moving keys out
+
+Signing goes through a three-member interface — `{ kid, publicKey, sign(digest) }`
+— so every key store is an adapter rather than a rewrite.
+
+```bash
+# Anything that reads a digest on stdin and prints a signature.
+PROOFWIRE_SIGNER=command
+PROOFWIRE_SIGNER_COMMAND=/usr/local/bin/kms-sign
+PROOFWIRE_SIGNER_ARGS="--key-id alias/proofwire-hub"
+PROOFWIRE_PUBLIC_KEY=<raw Ed25519 public key, base64url>
+```
+
+```bash
+# Or a signing sidecar over HTTP.
+PROOFWIRE_SIGNER=http
+PROOFWIRE_SIGNER_URL=https://signer.internal/sign
+PROOFWIRE_SIGNER_TOKEN=<bearer>
+PROOFWIRE_PUBLIC_KEY=<raw Ed25519 public key, base64url>
+```
+
+Each role can be configured separately with `PROOFWIRE_HUB_SIGNER` and
+`PROOFWIRE_WITNESS_SIGNER`. **Put the witness key in different custody** — a
+witness whose key sits beside the log's key is not independent of it.
+
+Signatures are accepted as hex, base64 or base64url; an Ed25519 signature is
+always 64 bytes, which makes the encodings unambiguous.
+
+### What happens when it is wrong
+
+- **A misconfigured signer disables signing.** It never falls back to a local
+  key, because quietly minting one defeats the purpose of moving to a KMS.
+- **Startup self-tests** by signing a random digest and verifying it against
+  the configured public key. A missing command, a denied grant, the wrong key,
+  or an unexpected encoding all surface at boot.
+- **A dead signer stops checkpoints, never ingest.** Receipts keep being
+  accepted and verified; only the tree-head signature pauses.
+
+### Rotation
+
+Recording a new key for a role retires the old one and keeps it forever, so a
+checkpoint signed by a retired key still verifies — otherwise rotating would
+silently invalidate the history it was meant to protect.
+`/.well-known/proofwire` publishes every key, retired ones included.
+
+---
+
+## Backups
+
+```bash
+proofwire-hub backup ./backups/today.db
+proofwire-hub verify-backup ./backups/today.db
+proofwire-hub restore ./backups/today.db
+proofwire-hub reconcile
+```
+
+Set `PROOFWIRE_BACKUP_DIR` and the hub takes them on a schedule with retention.
+
+Backups use `VACUUM INTO`, which reads through SQLite's own MVCC: consistent
+without stopping writes, and a single file with none of the WAL sidecars that
+make a naive `cp` subtly wrong. Each backup gets a manifest with a SHA-256, and
+`verify-backup` re-verifies **every log inside it** — find the bad backup on a
+quiet afternoon, not during an incident.
+
+### The thing to understand before you need it
+
+**A restored hub cannot detect its own staleness.**
+
+Restore a snapshot taken at 10 entries onto a hub that had reached 18, and the
+result is perfectly self-consistent: 10 entries, a checkpoint covering 10,
+everything verifying. The proof that 18 ever existed was in the data the
+restore discarded. `reconcile` will report clean — and will tell you that a
+clean result here proves internal consistency, not currency.
+
+To an auditor holding the later checkpoint, that gap is **indistinguishable
+from deletion**. It has to be: a system where the operator can say "that was a
+restore, not a deletion" and be believed has no integrity guarantee at all.
+
+Only a party holding later evidence can see it:
+
+- **the agent**, whose local log is longer. This is the normal path and it
+  self-heals — `pw push` notices the shortfall and re-sends the difference,
+  idempotently.
+- **a witness or auditor** with a later checkpoint:
+  `proofwire-hub reconcile --against checkpoints.json`
+
+So: **after any restore, re-push from every agent.** A restore runbook that
+does not end there is incomplete. And this is why the agents' local logs are
+never optional — they are the authoritative copy; the hub is a replica.
+
+`reconcile` distinguishes a **recoverable** gap (re-push fixes it) from a
+**divergent** one (the stored history contradicts a signed root — no re-push
+fixes that, and it should be treated as an incident).
 
 ---
 
@@ -111,6 +220,31 @@ blast radius of the one runtime that held it.
 An agent needs `receipts:write logs:write logs:read policies:read`. Nothing more.
 Giving it `receipts:read` lets a compromised agent read back the entire
 organisation's history of what other agents did.
+
+### Invitations and resets
+
+```bash
+curl -X POST $HUB/v1/invites -H "authorization: Bearer $ADMIN" \
+  -d '{"email":"auditor@bigfour.test","role":"auditor"}'
+```
+
+The link is returned **once** and never stored — only its hash is. Set
+`PROOFWIRE_NOTIFY_URL` and it is also POSTed to your own mail service;
+delivery is a webhook rather than built-in SMTP so the hub never depends on an
+SMTP configuration nobody notices is broken. The link is returned either way,
+so an admin is never stuck.
+
+Users reset their own passwords at `/forgot`. Four properties worth knowing:
+
+- Tokens are stored **only as hashes**, so a database leak does not hand over
+  working reset links.
+- A new token **invalidates any outstanding one** of the same kind.
+- Setting a password **revokes every existing session** — a reset exists
+  because the account may already be in someone else's hands.
+- Requesting a reset answers **identically** whether or not the address exists.
+
+An invited account holds a membership an admin can see, shown as `invited`, but
+cannot be signed in to until the invitation is accepted.
 
 ### Sessions — people
 
@@ -300,11 +434,13 @@ confidence rather than evidence.
    new log. A chain signed by two keys over its life is one whose validity
    depends on knowing exactly when the swap happened, which the log cannot
    itself establish.
-3. **The hub's own keys live in the database.** A KMS/HSM backend is the next
-   piece of work. Until then, the database is as sensitive as a signing key.
+3. **The default `local` signer still keeps keys in the database.** Set
+   `PROOFWIRE_SIGNER` to move them out. Vendor wrapper scripts for AWS/GCP/Azure
+   KMS are not written yet — the `command` backend takes any of them.
 4. **Timestamps come from the signing host.** A backdated entry is flagged when
    it contradicts its neighbours; a uniformly wrong clock is not detectable
    from the log alone.
-5. **No SSO yet.** Sessions are email plus password. SAML/OIDC is planned.
+5. **No SSO yet.** Sessions are email plus password, with invitations and
+   resets. SAML/OIDC is planned.
 6. **`node:sqlite` is still marked experimental** upstream. It is stable in
    practice and the API surface used here is small, but it is worth knowing.

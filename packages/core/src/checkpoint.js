@@ -149,3 +149,38 @@ export function verifyCheckpoint(checkpoint, keyring, opts = {}) {
 
   return { ok: issues.length === 0, issues, signers, witnesses };
 }
+
+/**
+ * Sign a checkpoint with an async signer.
+ *
+ * The useful key stores — KMS, HSM, a Vault transit engine — are all network
+ * or IPC calls, so the signing interface has to be async. This is the variant
+ * the hub uses; `signCheckpoint` above remains for in-process keys.
+ *
+ * @param {{ kid: string, sign: (digest: Buffer) => Promise<string> }} signer
+ * @param {CheckpointBody} body
+ * @param {'log'|'witness'} [role='log']
+ * @returns {Promise<Checkpoint>}
+ */
+export async function signCheckpointWith(signer, body, role = 'log') {
+  const sig = await signer.sign(checkpointDigest(body));
+  return { body, sigs: [{ role, kid: signer.kid, sig }] };
+}
+
+/**
+ * Counter-sign an existing checkpoint with an async signer.
+ *
+ * @param {Checkpoint} checkpoint
+ * @param {{ kid: string, sign: (digest: Buffer) => Promise<string> }} signer
+ * @returns {Promise<Checkpoint>}
+ */
+export async function cosignWith(checkpoint, signer) {
+  const sig = await signer.sign(checkpointDigest(checkpoint.body));
+  return {
+    body: checkpoint.body,
+    sigs: [
+      ...checkpoint.sigs.filter((s) => s.kid !== signer.kid),
+      { role: /** @type {const} */ ('witness'), kid: signer.kid, sig, ts: new Date().toISOString() },
+    ],
+  };
+}
