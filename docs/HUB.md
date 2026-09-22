@@ -278,6 +278,10 @@ auditing, which is the point.
 A hub signing its own roots proves very little — it can sign two. Independent
 witnesses are what close that.
 
+Everything below is for running your own. For what a *hosted* witness
+service would need beyond this — self-serve accounts, billing, a published
+key, partner-run nodes — see [`docs/WITNESS-SERVICE.md`](WITNESS-SERVICE.md).
+
 ```bash
 # On the witness's own infrastructure, run a second hub:
 docker compose up -d witness

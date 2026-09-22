@@ -204,7 +204,11 @@ Listed because a plan without this section is marketing.
 
 ## First five things to build next
 
-1. **Hosted witness service** — the revenue mechanism and the moat.
+1. **Hosted witness service** — the revenue mechanism and the moat. Scoped in
+   [`docs/WITNESS-SERVICE.md`](docs/WITNESS-SERVICE.md): what already exists
+   and is reusable, what's net-new, and which decisions (domain, hosting
+   budget, billing provider, key custody) are business calls this repo can't
+   make for you.
 2. **Python SDK** — most agent frameworks are Python; the proxy covers MCP but
    the library needs to meet people where they are.
 3. **Monitor-only mode** — removes the adoption objection entirely.
