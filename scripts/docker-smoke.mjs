@@ -4,7 +4,12 @@
 // is what building the image is *for* — a `docker build` that succeeds proves
 // nothing about any of this on its own, as one earlier receipt shape found
 // out the hard way (a crash this repository's tests now cover directly).
-import { generateIdentity, buildReceipt, signReceipt, entryHash, GENESIS_PREV, verifyBundle } from '@proof_wire/core';
+//
+// With WITNESS_URL and WITNESS_TOKEN set it also drives a second container,
+// run witness-only: the hub's checkpoint is co-signed there, the witness's
+// key is taken from the witness itself, and the result is verified with that
+// key pinned — the whole point of running a witness as a separate process.
+import { generateIdentity, buildReceipt, signReceipt, entryHash, GENESIS_PREV, verifyBundle, verifyCheckpoint } from '@proof_wire/core';
 
 const HUB = process.env.HUB_URL ?? 'http://localhost:8787';
 const token = process.env.AGENT_TOKEN;
@@ -49,7 +54,7 @@ const write = await call('POST', `/v1/logs/${log.slug}/receipts`, { receipts });
 if (write.accepted !== 3) throw new Error(`expected 3 accepted, got ${JSON.stringify(write)}`);
 
 console.log('checkpoint');
-await call('POST', `/v1/logs/${log.slug}/checkpoint`, {});
+const checkpoint = await call('POST', `/v1/logs/${log.slug}/checkpoint`, {});
 
 console.log('fetch and verify the bundle');
 const bundle = await call('GET', `/v1/logs/${log.slug}/bundle`, undefined, { as: auditToken });
@@ -61,3 +66,44 @@ const bad = await fetch(HUB + '/v1/logs', { headers: { authorization: 'Bearer pw
 if (bad.status !== 401) throw new Error(`expected 401 for a bogus token, got ${bad.status}`);
 
 console.log(`OK: ${bundle.entries.length} entries, ${result.checked} checked, root ${bundle.root.slice(0, 16)}…`);
+
+const WITNESS = process.env.WITNESS_URL;
+const witnessToken = process.env.WITNESS_TOKEN;
+if (WITNESS) {
+  if (!witnessToken) throw new Error('WITNESS_URL is set but WITNESS_TOKEN is not');
+  const getJson = async (url, headers = {}) => {
+    const res = await fetch(url, { headers });
+    return { status: res.status, json: await res.json().catch(() => null) };
+  };
+
+  console.log('witness: identify itself as witness-only, and publish only its own key');
+  const wk = await getJson(`${WITNESS}/.well-known/proofwire`);
+  if (wk.json?.service !== 'proofwire-witness') throw new Error(`witness is not in witness-only mode: ${JSON.stringify(wk.json)}`);
+  if ('hub' in wk.json) throw new Error('witness-only node advertised a hub key');
+
+  console.log('witness: refuse everything a hub would answer');
+  for (const p of ['/v1/logs', '/v1/keys', '/v1/policies', '/']) {
+    const res = await getJson(WITNESS + p, { authorization: `Bearer ${witnessToken}` });
+    if (res.status !== 404) throw new Error(`witness answered GET ${p} with ${res.status}, expected 404`);
+  }
+
+  console.log('witness: co-sign the hub\'s checkpoint');
+  const res = await fetch(`${WITNESS}/v1/witness/cosign`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${witnessToken}` },
+    body: JSON.stringify({ checkpoint }),
+  });
+  const cosigned = await res.json();
+  if (!res.ok) throw new Error(`witness refused: ${res.status} ${JSON.stringify(cosigned)}`);
+
+  console.log('verify it, with the witness key pinned from the witness and the log key from the hub');
+  const hubKeys = (await getJson(`${HUB}/.well-known/proofwire`)).json;
+  const witnessed = { body: checkpoint.body, sigs: [...checkpoint.sigs, cosigned.signature] };
+  const check = verifyCheckpoint(witnessed, { [hubKeys.hub.kid]: hubKeys.hub.publicKey }, {
+    minWitnesses: 1,
+    trustedWitnesses: { [wk.json.witness.kid]: wk.json.witness.publicKey },
+  });
+  if (!check.ok) throw new Error(`witnessed checkpoint did not verify: ${check.issues.join('; ')}`);
+
+  console.log(`OK: checkpoint at size ${checkpoint.body.size} co-signed by ${wk.json.witness.kid}, verified with it pinned`);
+}

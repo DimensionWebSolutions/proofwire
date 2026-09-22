@@ -126,6 +126,25 @@ jobs:
           echo "AUDIT_TOKEN=$(grep '^  auditor' bootstrap.out | grep -oE 'pwk_[A-Za-z0-9._-]+')" >> "$GITHUB_ENV"
           grep -q 'pwk_' bootstrap.out || { echo "::error::no token found in bootstrap output"; cat bootstrap.out; exit 1; }
 
+      - name: Run a witness-only node beside it, and give it a customer
+        run: |
+          # The same image, the way docker-compose.yml runs its witness: a
+          # separate process with its own database and key, answering nothing
+          # but co-signing, its key and health checks.
+          docker run -d --name witness -p 8788:8787 -e PROOFWIRE_WITNESS_ONLY=1 proofwire-hub serve
+          for i in $(seq 1 15); do
+            status="$(docker inspect --format='{{.State.Health.Status}}' witness)"
+            [ "$status" = healthy ] && break
+            [ "$status" = unhealthy ] && { echo "witness went unhealthy"; docker logs witness; exit 1; }
+            sleep 2
+          done
+          [ "$status" = healthy ] || { echo "witness never became healthy"; docker logs witness; exit 1; }
+          # witness-key prints to stderr, like bootstrap.
+          docker exec witness node packages/server/src/bin.js witness-key ci-customer > witness-key.out 2>&1
+          echo "WITNESS_TOKEN=$(grep '^  token' witness-key.out | grep -oE 'pwk_[A-Za-z0-9._-]+')" >> "$GITHUB_ENV"
+          echo "WITNESS_URL=http://localhost:8788" >> "$GITHUB_ENV"
+          grep -q 'pwk_' witness-key.out || { echo "::error::no token in witness-key output"; cat witness-key.out; exit 1; }
+
       - name: Drive it like a client would
         run: node scripts/docker-smoke.mjs
 
@@ -140,4 +159,6 @@ jobs:
 
       - name: Logs, on failure
         if: failure()
-        run: docker logs hub || true
+        run: |
+          docker logs hub || true
+          docker logs witness || true

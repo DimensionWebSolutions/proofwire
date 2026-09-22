@@ -85,6 +85,7 @@ edit is one more thing to get wrong in a container.
 | `PROOFWIRE_DB` | `./data/proofwire.db` | Put this on a durable volume. |
 | `PROOFWIRE_TRUST_PROXY` | `0` | Set to `1` **only** behind a proxy you control. |
 | `PROOFWIRE_CHECKPOINT_EVERY` | `500` | Receipts between automatic checkpoints. |
+| `PROOFWIRE_WITNESS_ONLY` | `0` | Set to `1` to run a witness and nothing else — see [Witnessing](#witnessing). |
 | `PROOFWIRE_SELFCHECK_MINUTES` | `60` | Re-verify every stored log on this interval. |
 | `PROOFWIRE_APPROVAL_TTL` | `900` | Seconds before an undecided escalation expires. |
 | `PROOFWIRE_ACCESS_LOG` | on | Set `off` to silence per-request JSON logs. |
@@ -283,13 +284,34 @@ service would need beyond this — self-serve accounts, billing, a published
 key, partner-run nodes — see [`docs/WITNESS-SERVICE.md`](WITNESS-SERVICE.md).
 
 ```bash
-# On the witness's own infrastructure, run a second hub:
+# On the witness's own infrastructure. docker-compose.yml runs it witness-only.
 docker compose up -d witness
 
-# From the agent's machine:
+# Give each customer a key — on the host, not over HTTP. It also prints this
+# witness's public key, for the customer and their auditors to pin.
+docker compose exec witness node packages/server/src/bin.js witness-key acme
+
+# From the customer's agent machine:
 pw remote add --name witness --url https://witness.example.org --token <key>
 pw cosign --remote witness
 ```
+
+**Run a witness witness-only** (`PROOFWIRE_WITNESS_ONLY=1`, which
+`docker-compose.yml` already sets). It then answers exactly six routes —
+health, readiness, `/.well-known/proofwire`, `/v1/me`, the witness key and
+co-signing — and 404s everything else: no console, no log ingest, no key
+management over HTTP, and no hub key created at all. A witness is the one
+component whose compromise defeats the split-view defence, so it should not
+be carrying a whole hub's surface for no reason. `bootstrap` refuses on a
+witness-only node; `witness-key` replaces it.
+
+**One customer, one organization.** `witness-key` creates an organization per
+customer, and that is load-bearing: a witness remembers the last root it
+signed per organization and log name, and does not check the log's own
+signature on a checkpoint it is asked to co-sign. Customers sharing an
+organization could each claim the other's log name first and have the other
+refused as a split view. Running `witness-key` again for the same customer
+adds a key, which is how a rotation starts.
 
 The witness enforces two rules and returns a signature only if both hold:
 

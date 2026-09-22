@@ -33,6 +33,7 @@ have to ship together.
 | A witness-scoped credential (`witness:sign` + `logs:read`, nothing else) | `packages/server/src/auth.js` | Done — minted one by hand this session (login, `POST /v1/keys`, same-origin CSRF check and all) |
 | A witness client, self-hosted side | `pw cosign --remote <name>`, `pw remote add` | Done |
 | Docker image, health-checked, read-only rootfs, non-root, built and smoke-tested in CI | `Dockerfile`, `.github/workflows/ci.yml`'s `docker` job | Done |
+| Witness-only mode and per-customer key issuance (Phase 0 below) | `PROOFWIRE_WITNESS_ONLY`, `WITNESS_ONLY_ROUTES` in `app.js`, `proofwire-hub witness-key` | Done — CI runs the image as a hub *and* as a separate witness-only node, co-signs the hub's checkpoint on the witness and verifies it with the witness key pinned |
 
 **Nothing above needs to be rewritten.** The gap is entirely in what sits
 around it.
@@ -43,17 +44,29 @@ around it.
 
 ### 1. A witness-only deployment mode
 
-`docker-compose.yml`'s `witness` service today is the *whole hub image* —
-every route (`/v1/logs`, `/v1/keys`, `/v1/approvals`, the console UI, org
-creation) is live, just unused by convention. That's fine self-hosted; it is
+`docker-compose.yml`'s `witness` service was the *whole hub image* — every
+route (`/v1/logs`, `/v1/keys`, `/v1/approvals`, the console UI, org
+creation) live, just unused by convention. That's fine self-hosted; it is
 not fine as a thing Proofwire runs publicly and gets attacked. A node whose
 only job is `/v1/witness/cosign`, `/v1/witness/key`, `/health` and `/ready`
 should not also be exposing org/key administration.
 
-**Work:** a `PROOFWIRE_WITNESS_ONLY=1` flag that mounts only those four
-routes. Small, contained, no new architecture — this is the one piece of
-this document that's pure engineering with no external dependency, and could
-start today.
+**Done.** `PROOFWIRE_WITNESS_ONLY=1` keeps six routes — those four, plus
+`/.well-known/proofwire` (which then publishes only the witness key) and
+`/v1/me` (which `pw remote add` needs to prove a credential) — and 404s the
+rest. The allowlist is one constant, `WITNESS_ONLY_ROUTES`, applied to the
+route table after it's built, so a route added to the hub later is excluded
+from a witness by default rather than exposed by default; the test that
+checks it derives the list of routes that must be gone from a full hub's own
+route table, for the same reason. A witness-only node creates no hub key at
+all. `docker-compose.yml`'s witness service now sets the flag.
+
+Keys can't be minted over HTTP on a witness-only node, so there's a host-side
+command for it: `proofwire-hub witness-key <customer>` creates that
+customer's organization and a key scoped to `witness:sign` + `logs:read`,
+and prints the witness's own public key for the customer to pin. That is
+Phase 1's "API keys issued by hand," made into one command instead of the
+login-and-`curl` sequence this session used the first time.
 
 ### 2. Self-serve account and key issuance
 
@@ -104,7 +117,7 @@ an invoicing path that doesn't assume everyone pays by card.
 
 ### 5. Witness-specific operational hardening
 
-Two things that are true of a witness and not obviously true of a hub:
+Three things that are true of a witness and not obviously true of a hub:
 
 - **A witness's restore-from-backup problem is a security problem, not just
   an availability one.** `packages/server/src/backup.js`'s own documentation
@@ -121,6 +134,18 @@ Two things that are true of a witness and not obviously true of a hub:
   itself again; another is a harder guarantee, with state replicated
   synchronously rather than backed up periodically. Neither is implemented
   or decided yet — this is a design gap, not a documented policy.
+- **The witness doesn't check the log's own signature.** Found while building
+  Phase 0: `/v1/witness/cosign` signs any well-formed checkpoint body that
+  extends what it last saw for that organization and log name — it never
+  verifies the log's signature on the checkpoint it's shown. The split-view
+  guarantee still holds (it's about *what the witness has already signed*,
+  not who submitted it), and Phase 0 contains the blast radius by giving
+  every customer their own organization, so only a customer's own key can
+  claim a position under their log names. But it means a witness's memory of
+  a log is first-come, not bound to the log's key. Binding a log to its
+  public key on first sight, and refusing checkpoints not signed by it
+  afterwards, is the obvious hardening — a protocol change worth deciding
+  deliberately, not slipping in.
 - **Key custody.** A self-hosted operator can accept a local key file; a
   service Proofwire operates and charges money for should not have its
   witness key sitting in a container's SQLite file. `signer.js`'s
@@ -189,8 +214,10 @@ these are genuinely business calls, not engineering ones:
 
 ## A phased path
 
-**Phase 0 — witness-only mode.** The `PROOFWIRE_WITNESS_ONLY` flag (item 1).
-Pure engineering, no external dependency, could start now if you want it.
+**Phase 0 — witness-only mode. Done** (item 1): the flag, the route
+allowlist, `witness-key`, `docker-compose.yml` using it, and a CI job that
+runs the image as a separate witness-only node and verifies a real co-signed
+checkpoint with the witness key pinned.
 
 **Phase 1 — one node, free, manual.** One Proofwire-operated witness,
 running Phase 0's image, on whatever infrastructure and domain get decided
@@ -210,6 +237,8 @@ the backup/restore question in item 5 actually resolved rather than noted.
 a documentation checklist behind it; the software side is already what
 Phase 0 built.
 
-Phase 0 is the only piece that's ready to become a coding task right now
-without a decision from you first. Say the word and I'll scope *that* down
-to an actual implementation plan, or start it.
+With Phase 0 done, what's left before Phase 1 isn't code: it's a domain and
+somewhere to run the node. The next engineering candidates that don't need
+those decisions are the log-key binding above, and publishing the witness
+key into this repository as a dated, append-only record (item 3's first
+half), ready for the day there's a real node's key to put in it.

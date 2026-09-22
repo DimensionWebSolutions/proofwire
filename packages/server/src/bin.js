@@ -12,7 +12,11 @@ import {
  *
  *   proofwire-hub serve                 start the server
  *   proofwire-hub bootstrap             create the first org, admin and keys
+ *   proofwire-hub witness-key <name>    give a customer a key to this node's witness
  *   proofwire-hub check                 verify every stored log
+ *
+ * PROOFWIRE_WITNESS_ONLY=1 turns the server into a witness and nothing else:
+ * see WITNESS_ONLY_ROUTES in app.js for the whole of what it then answers.
  *
  * Configuration is environment-only. A hub reads secrets and binds ports; a
  * config file that can be edited by whoever can reach the filesystem is one
@@ -33,6 +37,7 @@ function configFromEnv() {
   if (env.PROOFWIRE_TRUST_PROXY === '1') config.trustProxy = true;
   if (env.PROOFWIRE_CHECKPOINT_EVERY) config.checkpointEvery = Number(env.PROOFWIRE_CHECKPOINT_EVERY);
   if (env.PROOFWIRE_APPROVAL_TTL) config.approvalTtlSeconds = Number(env.PROOFWIRE_APPROVAL_TTL);
+  if (env.PROOFWIRE_WITNESS_ONLY === '1') config.witnessOnly = true;
   return config;
 }
 
@@ -46,22 +51,33 @@ async function serve() {
   const hub = new Hub(configFromEnv());
   const { url } = await hub.listen();
 
+  const witnessOnly = hub.config.witnessOnly;
   console.error('');
-  console.error(B('  Proofwire hub') + DIM('  0.2.0'));
+  console.error(B(witnessOnly ? '  Proofwire witness' : '  Proofwire hub') + DIM('  0.2.0'));
   console.error(DIM(`  ${url}`));
   console.error(DIM(`  db       ${hub.config.database}`));
-  console.error(DIM(`  hub key  ${hub.hubSigner.kid}  [${hub.hubSigner.kind}]`));
+  if (!witnessOnly) console.error(DIM(`  hub key  ${hub.hubSigner.kid}  [${hub.hubSigner.kind}]`));
   console.error(DIM(`  witness  ${hub.witnessSigner.kid}  [${hub.witnessSigner.kind}]`));
+  if (witnessOnly) console.error(DIM('  mode     witness only — co-signing, key and health routes, nothing else'));
 
-  // Prove both signers work now, with a real signature verified against the
+  // Prove the signers work now, with a real signature verified against the
   // configured public key. That catches a missing command, a denied KMS grant,
   // the wrong key wired up, and an unexpected output encoding — all at boot,
   // rather than at the first checkpoint hours later.
-  for (const [role, signer] of [['hub', hub.hubSigner], ['witness', hub.witnessSigner]]) {
+  const roles = witnessOnly
+    ? [['witness', hub.witnessSigner]]
+    : [['hub', hub.hubSigner], ['witness', hub.witnessSigner]];
+  for (const [role, signer] of roles) {
     const res = await selfTest(signer);
     if (!res.ok) {
       console.error(RED(`  ${role} signer is not usable: ${res.error}`));
-      console.error(DIM('  Receipts will still be accepted and verified; checkpoints will not be signed.'));
+      console.error(
+        DIM(
+          witnessOnly
+            ? '  Every co-signing request will be refused until this is fixed.'
+            : '  Receipts will still be accepted and verified; checkpoints will not be signed.',
+        ),
+      );
     }
   }
 
@@ -120,7 +136,19 @@ async function serve() {
  * keys a deployment actually needs on day one.
  */
 async function bootstrap() {
-  const hub = new Hub(configFromEnv());
+  const config = configFromEnv();
+  if (config.witnessOnly) {
+    // bootstrap's admin password and agent/auditor keys are for a hub. On a
+    // witness there is no console to sign in to and no log to push to, so it
+    // would hand out credentials that can do nothing — or, worse, look like
+    // they should.
+    console.error(RED('  bootstrap is for a hub; this is a witness-only node.'));
+    console.error(DIM('  Give each customer their own key instead:'));
+    console.error(`    ${CYAN('proofwire-hub witness-key <customer name>')}`);
+    process.exitCode = 1;
+    return;
+  }
+  const hub = new Hub(config);
   const auth = new Auth(hub.store);
 
   const orgName = process.env.PROOFWIRE_ORG ?? 'Acme';
@@ -180,6 +208,74 @@ async function bootstrap() {
   await hub.close();
 }
 
+/**
+ * Give one customer a key to this node's witness.
+ *
+ * Each customer gets an organization of their own, and that is load-bearing,
+ * not tidiness. A witness remembers the last root it signed per organization
+ * and log name, and a co-signing request carries no signature the witness
+ * checks — so two customers sharing an organization could each claim the
+ * other's log name first, and the second to arrive would be refused as a
+ * split view it never caused.
+ *
+ * Running it again for the same customer adds a key rather than replacing
+ * one, which is what a rotation needs: issue the new key, move the client
+ * over, then revoke the old one.
+ */
+async function witnessKey() {
+  const name = process.argv.slice(3).join(' ').trim();
+  const slug = name.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+  if (!slug) {
+    console.error(RED('  usage: proofwire-hub witness-key <customer name>'));
+    process.exitCode = 2;
+    return;
+  }
+
+  const hub = new Hub(configFromEnv());
+  const existing = hub.store.orgBySlug(slug);
+  const org = existing ?? hub.store.createOrg({ slug, name });
+
+  const key = hub.auth.createKey({
+    orgId: org.id,
+    name: 'witness-client',
+    // logs:read only so `pw remote add` can prove the key works via /v1/me.
+    // On a witness-only node there are no logs for it to read.
+    scopes: ['witness:sign', 'logs:read'],
+    createdBy: 'witness-key',
+  });
+  hub.store.recordEvent({
+    orgId: org.id,
+    actor: 'witness-key',
+    actorKind: 'system',
+    action: 'key.create',
+    subject: key.id,
+    meta: { name: 'witness-client', scopes: ['witness:sign', 'logs:read'] },
+  });
+
+  const url = hub.config.publicUrl || `http://localhost:${hub.config.port}`;
+  const { kid, publicKey } = hub.witnessSigner;
+
+  console.error('');
+  console.error(B(existing ? '  Additional witness key issued' : '  Witness customer created'));
+  console.error(DIM('  ─────────────────────────────────────────────'));
+  console.error(`  customer   ${org.slug}  ${DIM(org.id)}`);
+  console.error(`  token      ${CYAN(key.token)}`);
+  console.error(DIM('             witness:sign logs:read — shown once, not stored in recoverable form'));
+  console.error('');
+  console.error(B('  This witness') + DIM('  (send these through a channel other than this node)'));
+  console.error(`  kid        ${kid}`);
+  console.error(`  public key ${publicKey}`);
+  console.error('');
+  console.error(DIM('  The customer connects with:'));
+  console.error(`    ${CYAN(`pw remote add --name witness --url ${url} --token <token>`)}`);
+  console.error(`    ${CYAN('pw cosign --remote witness')}`);
+  console.error(DIM('  and their auditors pin this witness with:'));
+  console.error(`    ${CYAN(`pw check evidence.json --witnesses 1 --witness-key ${kid}=${publicKey}`)}`);
+  console.error('');
+
+  await hub.close();
+}
+
 /** Verify every stored log and exit non-zero if any fails. */
 async function check() {
   const hub = new Hub(configFromEnv());
@@ -216,6 +312,7 @@ const command = process.argv[2] ?? 'serve';
 const COMMANDS = {
   serve,
   bootstrap,
+  'witness-key': witnessKey,
   check,
   backup: cmdBackup,
   'verify-backup': cmdVerifyBackup,

@@ -24,6 +24,11 @@ services:
   # control — a different account, a different provider, ideally a different
   # company. A witness on the same host as the log it witnesses proves nothing
   # about that log that the log could not have claimed itself.
+  #
+  # Witness-only: it answers co-signing, its key and health checks, and 404s
+  # everything else — no console, no log ingest, no key management over HTTP.
+  # Give each customer a key from the host:
+  #   docker compose exec witness node packages/server/src/bin.js witness-key <customer>
   witness:
     build: .
     ports:
@@ -31,7 +36,7 @@ services:
     volumes:
       - proofwire-witness:/data
     environment:
-      PROOFWIRE_CHECKPOINT_EVERY: "0"
+      PROOFWIRE_WITNESS_ONLY: "1"
     restart: unless-stopped
     read_only: true
     tmpfs:

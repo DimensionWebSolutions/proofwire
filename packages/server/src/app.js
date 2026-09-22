@@ -12,7 +12,7 @@ import {
 } from '@proof_wire/core';
 import { openDatabase, newId, now, transact } from './db.js';
 import { Store, StoreError } from './store.js';
-import { signerFor, selfTest } from './signer.js';
+import { signerFor, selfTest, disabledSigner } from './signer.js';
 import { Auth, Tokens, requireScope, requireLog, scopesForRole, verifyPassword, SCOPES, ROLES } from './auth.js';
 import {
   Router,
@@ -52,7 +52,30 @@ export const DEFAULT_CONFIG = {
   /** Auto-checkpoint after this many new receipts. 0 disables. */
   checkpointEvery: 500,
   publicUrl: '',
+  /** Serve only `WITNESS_ONLY_ROUTES`. For a node whose one job is co-signing. */
+  witnessOnly: false,
 };
+
+/**
+ * Everything a witness-only node answers. Anything else is a plain 404.
+ *
+ * A witness that is also a full hub exposes org creation, key management, the
+ * console and log ingest to the internet for no reason: none of it is needed
+ * to co-sign a checkpoint, all of it is attack surface, and a witness is the
+ * one component whose compromise defeats the split-view defence outright.
+ *
+ * `/v1/me` stays because `pw remote add` uses it to prove a credential works
+ * before storing it. Keys are minted with `proofwire-hub witness-key` on the
+ * host, not over HTTP.
+ */
+export const WITNESS_ONLY_ROUTES = Object.freeze([
+  'GET /health',
+  'GET /ready',
+  'GET /.well-known/proofwire',
+  'GET /v1/me',
+  'GET /v1/witness/key',
+  'POST /v1/witness/cosign',
+]);
 
 export class Hub {
   /** @param {Partial<typeof DEFAULT_CONFIG>} [config] */
@@ -66,7 +89,14 @@ export class Hub {
     // Signing goes through a `Signer`, which for a KMS or HSM backend holds no
     // key material at all. `local` remains the default so nothing breaks for an
     // existing self-hosted deployment.
-    this.hubSigner = signerFor(this.store, 'hub', config.env ?? process.env);
+    //
+    // A witness-only node has no hub role, so it gets no hub key at all — not
+    // an unused one sitting in the database, where it would also trip the
+    // "a signing key is stored in this database" warning on a node whose real
+    // key is in a KMS.
+    this.hubSigner = this.config.witnessOnly
+      ? disabledSigner('this is a witness-only node; it signs no checkpoints of its own')
+      : signerFor(this.store, 'hub', config.env ?? process.env);
     this.witnessSigner = signerFor(this.store, 'witness', config.env ?? process.env);
 
     // Kept for compatibility with callers that want the identity shape.
@@ -89,6 +119,29 @@ export class Hub {
 
     this.router = new Router();
     this._routes();
+    if (this.config.witnessOnly) this._restrictToWitness();
+  }
+
+  /**
+   * Drop every route not in `WITNESS_ONLY_ROUTES`.
+   *
+   * Filtering the one route table, rather than guarding each handler, keeps
+   * the whole public surface of a witness in a single list someone can audit —
+   * and means a route added to `_routes()` later is excluded by default instead
+   * of exposed by default.
+   */
+  _restrictToWitness() {
+    const keyOf = (route) => `${route.method} ${route.raw}`;
+    const allowed = new Set(WITNESS_ONLY_ROUTES);
+    const kept = this.router.routes.filter((route) => allowed.has(keyOf(route)));
+
+    // A route renamed in `_routes()` would otherwise leave a witness quietly
+    // unable to do its job while claiming to be up.
+    const missing = WITNESS_ONLY_ROUTES.filter((k) => !kept.some((route) => keyOf(route) === k));
+    if (missing.length) {
+      throw new Error(`witness-only mode names routes that do not exist: ${missing.join(', ')}`);
+    }
+    this.router.routes = kept;
   }
 
   // ── principal resolution ──────────────────────────────────────────────
@@ -179,22 +232,38 @@ export class Hub {
      * without credentials. A verifier that has to authenticate to get the key
      * it verifies with is not independent.
      */
-    r.get('/.well-known/proofwire', () => ({
-      service: 'proofwire-hub',
-      version: '0.2.0',
-      hub: { kid: this.hubSigner.kid, publicKey: this.hubSigner.publicKey },
-      witness: { kid: this.witnessSigner.kid, publicKey: this.witnessSigner.publicKey },
+    r.get('/.well-known/proofwire', () => {
       // Every key that has ever signed here, including retired ones. A
       // signature made before a rotation stays verifiable; without this, a
       // rotation would quietly invalidate the history it was meant to protect.
-      keys: this.store.serverKeys().map((k) => ({
+      const keys = this.store.serverKeys().map((k) => ({
         kid: k.kid,
         role: k.role,
         publicKey: k.public_key,
         retiredAt: k.retired_at,
-      })),
-      receiptVersion: 1,
-    }));
+      }));
+
+      // A witness publishes its witness key and nothing that could be mistaken
+      // for it. An auditor pinning a witness copies a key from here; offering
+      // a second, unrelated key on the same page invites pinning the wrong one.
+      if (this.config.witnessOnly) {
+        return {
+          service: 'proofwire-witness',
+          version: '0.2.0',
+          witness: { kid: this.witnessSigner.kid, publicKey: this.witnessSigner.publicKey },
+          keys: keys.filter((k) => k.role === 'witness'),
+          receiptVersion: 1,
+        };
+      }
+      return {
+        service: 'proofwire-hub',
+        version: '0.2.0',
+        hub: { kid: this.hubSigner.kid, publicKey: this.hubSigner.publicKey },
+        witness: { kid: this.witnessSigner.kid, publicKey: this.witnessSigner.publicKey },
+        keys,
+        receiptVersion: 1,
+      };
+    });
 
     // ── auth ────────────────────────────────────────────────────────────
     r.post('/v1/auth/login', async (ctx) => {
