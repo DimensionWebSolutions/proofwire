@@ -596,6 +596,58 @@ export class Store {
     return hydrateCheckpoint({ ...row, sigs: canonicalize(sigs) });
   }
 
+  // ── witnessing ────────────────────────────────────────────────────────
+
+  /**
+   * The last root this witness signed for a log, if any.
+   *
+   * @param {string} witnessKid
+   * @param {string} positionKey  `${orgId}:${log}`
+   */
+  witnessPosition(witnessKid, positionKey) {
+    return (
+      this.db
+        .prepare('SELECT * FROM witness_state WHERE witness_kid = ? AND log_id = ?')
+        .get(witnessKid, positionKey) ?? null
+    );
+  }
+
+  /**
+   * The key this witness requires a log's checkpoints to be signed with.
+   *
+   * @param {string} witnessKid
+   * @param {string} positionKey  `${orgId}:${log}`
+   * @returns {{ kid: string, public_key: string, bound_at: string, bound_by: string }|null}
+   */
+  witnessBinding(witnessKid, positionKey) {
+    return (
+      this.db
+        .prepare('SELECT * FROM witness_log_keys WHERE witness_kid = ? AND log_id = ?')
+        .get(witnessKid, positionKey) ?? null
+    );
+  }
+
+  /**
+   * Bind (or, for an operator, rebind) a log to a signing key. Never touches
+   * the recorded position: a rebind that also reset it would let whoever asked
+   * for the rebind rewrite what the witness has already attested to.
+   *
+   * @param {{ witnessKid: string, positionKey: string, kid: string, publicKey: string, by: 'first-use'|'operator' }} args
+   */
+  bindWitnessLogKey(args) {
+    const boundAt = now();
+    this.db
+      .prepare(
+        `INSERT INTO witness_log_keys(witness_kid, log_id, kid, public_key, bound_at, bound_by)
+         VALUES(?, ?, ?, ?, ?, ?)
+         ON CONFLICT(witness_kid, log_id) DO UPDATE SET
+           kid = excluded.kid, public_key = excluded.public_key,
+           bound_at = excluded.bound_at, bound_by = excluded.bound_by`,
+      )
+      .run(args.witnessKid, args.positionKey, args.kid, args.publicKey, boundAt, args.by);
+    return { kid: args.kid, public_key: args.publicKey, bound_at: boundAt, bound_by: args.by };
+  }
+
   // ── self-audit ────────────────────────────────────────────────────────
 
   /**

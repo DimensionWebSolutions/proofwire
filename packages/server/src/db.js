@@ -334,6 +334,25 @@ const MIGRATIONS = [
       CREATE INDEX idx_tokens_user ON tokens(user_id, kind, used_at);
     `,
   },
+  {
+    id: '007_witness_log_keys',
+    sql: `
+      -- The key a log's checkpoints must be signed with, as far as this witness
+      -- is concerned. Bound the first time the witness co-signs for the log,
+      -- changed afterwards only by an operator on the host. Kept apart from
+      -- witness_state because the two change for different reasons: a rebind
+      -- replaces the key and must leave the recorded position exactly as it was.
+      CREATE TABLE witness_log_keys (
+        witness_kid TEXT NOT NULL,
+        log_id      TEXT NOT NULL,
+        kid         TEXT NOT NULL,
+        public_key  TEXT NOT NULL,
+        bound_at    TEXT NOT NULL,
+        bound_by    TEXT NOT NULL,      -- 'first-use' | 'operator'
+        PRIMARY KEY (witness_kid, log_id)
+      );
+    `,
+  },
 ];
 
 /**

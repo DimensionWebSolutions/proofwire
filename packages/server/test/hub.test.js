@@ -11,6 +11,7 @@ import {
   verifyConsistency,
   unhex,
   canonicalize,
+  signCheckpointWith,
 } from '@proof_wire/core';
 import { Hub } from '../src/app.js';
 import { Auth } from '../src/auth.js';
@@ -502,13 +503,15 @@ test('a witness signs a checkpoint and refuses a split view', async () => {
   const cp = (await api('POST', '/v1/logs/witnessed/checkpoint', { token: globex.key })).json;
   const signed = await api('POST', '/v1/witness/cosign', {
     token: globex.key,
-    body: { checkpoint: cp },
+    body: { checkpoint: cp, logPublicKey: hub.hubSigner.publicKey },
   });
   assert.equal(signed.status, 200);
   assert.equal(signed.json.signature.role, 'witness');
+  assert.equal(signed.json.logKey.kid, hub.hubSigner.kid);
 
-  // Same size, different root: the classic split view.
-  const forged = { body: { ...cp.body, root: 'cd'.repeat(32) }, sigs: [] };
+  // Same size, different root: the classic split view. Signed by the bound
+  // key, so it's the split-view rule that refuses it, not the signature check.
+  const forged = await signCheckpointWith(hub.hubSigner, { ...cp.body, root: 'cd'.repeat(32) });
   const rejected = await api('POST', '/v1/witness/cosign', {
     token: globex.key,
     body: { checkpoint: forged },
@@ -529,10 +532,9 @@ test('a witness will not attest to growth without a consistency proof', async ()
   }).catch(() => {});
 
   const log = hub.store.logBySlug(globex.org, 'witnessed');
-  const bigger = {
-    body: { v: 1, log: 'witnessed', size: log.size + 10, root: 'ef'.repeat(32), head: 'ab'.repeat(32), ts: new Date().toISOString() },
-    sigs: [],
-  };
+  const bigger = await signCheckpointWith(hub.hubSigner, {
+    v: 1, log: 'witnessed', size: log.size + 10, root: 'ef'.repeat(32), head: 'ab'.repeat(32), ts: new Date().toISOString(),
+  });
   const res = await api('POST', '/v1/witness/cosign', { token: globex.key, body: { checkpoint: bigger } });
   assert.equal(res.status, 400);
   assert.equal(res.json.error.code, 'missing_consistency_proof');
@@ -540,10 +542,9 @@ test('a witness will not attest to growth without a consistency proof', async ()
 
 test('a witness rejects a root that does not extend what it already signed', async () => {
   const log = hub.store.logBySlug(globex.org, 'witnessed');
-  const bogus = {
-    body: { v: 1, log: 'witnessed', size: log.size + 3, root: 'ef'.repeat(32), head: 'ab'.repeat(32), ts: new Date().toISOString() },
-    sigs: [],
-  };
+  const bogus = await signCheckpointWith(hub.hubSigner, {
+    v: 1, log: 'witnessed', size: log.size + 3, root: 'ef'.repeat(32), head: 'ab'.repeat(32), ts: new Date().toISOString(),
+  });
   const res = await api('POST', '/v1/witness/cosign', {
     token: globex.key,
     body: { checkpoint: bogus, consistencyProof: ['ab'.repeat(32)] },
@@ -557,10 +558,9 @@ test('a witness refuses to attest that a log shrank', async () => {
   const res = await api('POST', '/v1/witness/cosign', {
     token: globex.key,
     body: {
-      checkpoint: {
-        body: { v: 1, log: 'witnessed', size: 1, root: 'aa'.repeat(32), head: 'bb'.repeat(32), ts: new Date().toISOString() },
-        sigs: [],
-      },
+      checkpoint: await signCheckpointWith(hub.hubSigner, {
+        v: 1, log: 'witnessed', size: 1, root: 'aa'.repeat(32), head: 'bb'.repeat(32), ts: new Date().toISOString(),
+      }),
     },
   });
   assert.equal(res.status, 409);

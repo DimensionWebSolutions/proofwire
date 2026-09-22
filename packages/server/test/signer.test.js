@@ -258,9 +258,10 @@ test('a hub signs checkpoints through an external signer, end to end', async () 
 
   // And the witness, also external.
   const signed = await (await fetch(`${base}/v1/witness/cosign`, {
-    method: 'POST', headers, body: JSON.stringify({ checkpoint: cp }),
+    method: 'POST', headers, body: JSON.stringify({ checkpoint: cp, logPublicKey: hubKey.identity.publicKey }),
   })).json();
   assert.equal(signed.witness.kid, witnessKey.identity.kid);
+  assert.equal(signed.logKey.kid, hubKey.identity.kid, 'the log is bound to the external hub key');
   const { checkpointDigest } = await import('@proof_wire/core');
   assert.ok(
     verify(witnessKey.identity.publicKey, checkpointDigest(cp.body), signed.signature.sig),

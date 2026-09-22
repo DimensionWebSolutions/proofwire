@@ -306,22 +306,51 @@ be carrying a whole hub's surface for no reason. `bootstrap` refuses on a
 witness-only node; `witness-key` replaces it.
 
 **One customer, one organization.** `witness-key` creates an organization per
-customer, and that is load-bearing: a witness remembers the last root it
-signed per organization and log name, and does not check the log's own
-signature on a checkpoint it is asked to co-sign. Customers sharing an
-organization could each claim the other's log name first and have the other
-refused as a split view. Running `witness-key` again for the same customer
-adds a key, which is how a rotation starts.
+customer, and that is load-bearing: a witness binds each log name, per
+organization, to the key that signs its first checkpoint (below). Customers
+sharing an organization could each bind the other's log name to their own key
+first and lock the other out. Running `witness-key` again for the same
+customer adds a credential, which is how rotating *that* starts.
 
-The witness enforces two rules and returns a signature only if both hold:
+The witness enforces three rules and returns a signature only if all hold:
 
-1. **Never sign two different roots at the same size.** This is the split-view
+1. **Only the log signs for the log.** The first request for a log names the
+   key its checkpoints are signed with (`logPublicKey` — `pw cosign` sends it);
+   the witness checks the checkpoint is signed by that key and binds the log to
+   it. Every later checkpoint must carry a valid `log` signature from the bound
+   key. Naming a different key is `409 log_key_mismatch`; a missing or invalid
+   signature is `422 bad_log_signature`; a first request naming no key is
+   `400 missing_log_key`. This is checked before anything else, so a
+   checkpoint the log never signed cannot move or probe what the witness
+   remembers.
+2. **Never sign two different roots at the same size.** This is the split-view
    refusal, returned as `409 split_view`.
-2. **Never sign a larger root without a consistency proof** that it extends the
+3. **Never sign a larger root without a consistency proof** that it extends the
    last root this witness saw. Returned as `409 not_an_extension`.
 
-A refusal on either ground is not a transient error. It means the history the
-witness was shown does not match the history it saw before.
+A refusal on any of these grounds is not a transient error. It means the
+history, or the signer, the witness was shown does not match what it saw
+before.
+
+**Rotating a log's key.** A binding changes only on the host, by the witness
+operator, never over HTTP — whoever can rebind a log decides whose checkpoints
+the witness accepts for it:
+
+```bash
+docker compose exec witness node packages/server/src/bin.js \
+  witness-rebind <customer> <log> <new public key>
+```
+
+Get the new public key from the customer through a channel other than their
+witness credential — a stolen credential is exactly what a rebind request
+would otherwise be made with. The rebind is recorded in the control-plane
+audit trail, and it keeps the recorded position: the new key has to extend the
+history the witness already attested to, with a consistency proof, like any
+other checkpoint. It cannot start the log over. Switching a hub to a KMS
+signer changes its key, so plan the rebind alongside that change.
+
+Positions a witness recorded before it bound keys (anything from 0.2.0) are
+bound on their next successful co-signing, under the same first-use rule.
 
 **Witnesses are only as independent as you make them.** Three witnesses on
 infrastructure the log operator controls provide one witness's worth of
@@ -411,7 +440,7 @@ GET    /v1/logs/:log/bundle              evidence bundle for a third party
 POST   /v1/logs/:log/checkpoint          sign the current root
 GET    /v1/logs/:log/checkpoints
 
-POST   /v1/witness/cosign                counter-sign  { checkpoint, consistencyProof }
+POST   /v1/witness/cosign                counter-sign  { checkpoint, consistencyProof, logPublicKey }
 GET    /v1/witness/key
 
 GET    /v1/policies                      versions

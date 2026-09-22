@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import { fileURLToPath } from 'node:url';
-import { ProofLog, Policy, verifyBundle } from '@proof_wire/core';
+import { ProofLog, Policy, verifyBundle, signCheckpoint } from '@proof_wire/core';
 import { McpProxy } from '@proof_wire/proxy';
 import { LineFramer } from '@proof_wire/proxy/jsonrpc';
 import { RemoteSink, hubApprover, fetchPolicy } from '@proof_wire/proxy/remote';
@@ -397,12 +397,13 @@ test('the hub witness counter-signs a local checkpoint and refuses a rewrite', a
   const signed = await (await fetch(`${base}/v1/witness/cosign`, {
     method: 'POST',
     headers: hdrs(agentToken),
-    body: JSON.stringify({ checkpoint: cp }),
+    body: JSON.stringify({ checkpoint: cp, logPublicKey: local.identity.publicKey }),
   })).json();
   assert.equal(signed.signature.role, 'witness');
 
-  // Now offer the witness a different history at the same size.
-  const rewritten = { body: { ...cp.body, root: '11'.repeat(32) }, sigs: [] };
+  // Now offer the witness a different history at the same size — signed by
+  // the log's own key, as a rewrite by whoever holds it would be.
+  const rewritten = signCheckpoint(local.identity, { ...cp.body, root: '11'.repeat(32) });
   const refused = await fetch(`${base}/v1/witness/cosign`, {
     method: 'POST',
     headers: hdrs(agentToken),

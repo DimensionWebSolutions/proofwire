@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ProofLog, verifyCheckpoint } from '@proof_wire/core';
+import { ProofLog, verifyCheckpoint, signCheckpoint, generateIdentity } from '@proof_wire/core';
 import { Hub, WITNESS_ONLY_ROUTES } from '../src/app.js';
 
 /**
@@ -160,8 +160,10 @@ test('it co-signs a real log\'s checkpoints, and an auditor pinning it can verif
     action: { kind: 'tool_call', target: 'ops.refund', params: { n: log.size } },
     decision: { outcome: 'allow', policy: 'p0', rules: [] },
   });
-  const cosign = async (checkpoint, consistencyProof) =>
-    api('POST', '/v1/witness/cosign', { token: acme.token, body: { checkpoint, consistencyProof } });
+  const cosign = async (checkpoint, consistencyProof) => api('POST', '/v1/witness/cosign', {
+    token: acme.token,
+    body: { checkpoint, consistencyProof, logPublicKey: log.identity.publicKey },
+  });
   const trusted = { trustedWitnesses: { [acme.kid]: acme.publicKey }, minWitnesses: 1 };
 
   for (let i = 0; i < 3; i++) append();
@@ -181,32 +183,37 @@ test('it co-signs a real log\'s checkpoints, and an auditor pinning it can verif
   const v2 = verifyCheckpoint({ body: second.body, sigs: [...second.sigs, r2.json.signature] }, log.keyring, trusted);
   assert.ok(v2.ok, v2.issues.join('; '));
 
-  // The one thing a witness exists to refuse still gets refused.
-  const forked = { body: { ...second.body, root: 'cd'.repeat(32) }, sigs: [] };
+  // The one thing a witness exists to refuse still gets refused — even signed
+  // by the log's own key, which is exactly who would be forking it.
+  const forked = signCheckpoint(log.identity, { ...second.body, root: 'cd'.repeat(32) });
   const r3 = await cosign(forked);
   assert.equal(r3.status, 409);
   assert.equal(r3.json.error.code, 'split_view');
 });
 
 test('two customers\' positions are independent, which is why each gets an organization', async () => {
-  // A co-signing request carries no signature the witness checks, so its
-  // memory of "the root I signed at this size" is only as private as the
-  // organization it is filed under. Two customers using the same log name
-  // must not be able to block each other.
-  const at = (root) => ({
-    body: { v: 1, log: 'shared-name', size: 1, root, head: 'ab'.repeat(32), ts: new Date().toISOString() },
-    sigs: [],
+  // A witness binds a log name to the first key that signs for it, per
+  // organization. Two customers using the same log name, with different keys,
+  // must not lock each other out — or block each other as a "split view" of
+  // what are really two different logs.
+  const globexKey = generateIdentity().identity;
+  const acmeKey = generateIdentity().identity;
+  const at = (identity, root) => signCheckpoint(identity, {
+    v: 1, log: 'shared-name', size: 1, root, head: 'ab'.repeat(32), ts: new Date().toISOString(),
+  });
+  const cosign = (token, checkpoint, identity) => api('POST', '/v1/witness/cosign', {
+    token, body: { checkpoint, logPublicKey: identity.publicKey },
   });
 
-  const g1 = await api('POST', '/v1/witness/cosign', { token: globex.token, body: { checkpoint: at('11'.repeat(32)) } });
+  const g1 = await cosign(globex.token, at(globexKey, '11'.repeat(32)), globexKey);
   assert.equal(g1.status, 200, JSON.stringify(g1.json));
 
-  // A different root at the same size, from a different customer: not a split view.
-  const a1 = await api('POST', '/v1/witness/cosign', { token: acme.token, body: { checkpoint: at('22'.repeat(32)) } });
+  // Same log name, another customer, another key, another root: its own log.
+  const a1 = await cosign(acme.token, at(acmeKey, '22'.repeat(32)), acmeKey);
   assert.equal(a1.status, 200, JSON.stringify(a1.json));
 
-  // The same thing from the *same* customer is.
-  const g2 = await api('POST', '/v1/witness/cosign', { token: globex.token, body: { checkpoint: at('22'.repeat(32)) } });
+  // The same root change from the *same* customer is a split view.
+  const g2 = await cosign(globex.token, at(globexKey, '22'.repeat(32)), globexKey);
   assert.equal(g2.status, 409);
   assert.equal(g2.json.error.code, 'split_view');
 });

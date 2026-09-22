@@ -27,7 +27,7 @@ their author thought to check.
 | `packages/core/src/keys.js` | ~180 | Ed25519, a hand-assembled DER SPKI header, and strict base64url decoding |
 | `packages/core/src/checkpoint.js` | ~225 | Signed tree heads, witness co-signatures, witness pinning |
 | `packages/server/src/store.js` → `ingest()` | ~155 | The admission checks |
-| `packages/server/src/app.js` → `/v1/witness/cosign` | ~105 | Split-view refusal, and its transaction boundary |
+| `packages/server/src/app.js` → `/v1/witness/cosign` | ~170 | Split-view refusal, the log-to-key binding, and their shared transaction boundary |
 
 Out of scope unless you want to: the console, the CLI, the policy engine
 (security-relevant but not cryptographic), backups.
@@ -36,7 +36,7 @@ Out of scope unless you want to: the console, the CLI, the policy engine
 
 ```bash
 npm install          # zero external dependencies; installs 5 workspace links
-npm test             # 289 tests
+npm test             # 308 tests
 node --no-warnings=ExperimentalWarning packages/server/test/load.js
 npm run demo         # attacks a real log four ways
 ```
@@ -148,6 +148,17 @@ transaction, then signs outside it, because signing may be a KMS round-trip.
 The intended property: two concurrent requests offering different roots at the
 same size cannot both be signed. **Is the claim actually atomic against SQLite's
 isolation, and is failing-after-claim genuinely the safe direction?**
+
+The same transaction now also binds a log to its signing key on first use
+(`witness_log_keys`, migration `007`), and checks every later checkpoint's
+`log` signature against that key *before* the position is read. Two things
+worth attacking: **the first-use trust** — the first key to reach the witness
+for a log name wins, contained only by each customer having their own
+organization — and **the rebind path** (`proofwire-hub witness-rebind`), which
+is host-only by design and keeps the position. Is there a sequence of rebinds
+and co-signings that lets a new key attest to a history the old one never
+extended to? `packages/server/test/witness-binding.test.js` is where the
+current answer is pinned down.
 
 ### 5. Salted commitments
 

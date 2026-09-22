@@ -87,17 +87,33 @@ if (WITNESS) {
     if (res.status !== 404) throw new Error(`witness answered GET ${p} with ${res.status}, expected 404`);
   }
 
-  console.log('witness: co-sign the hub\'s checkpoint');
-  const res = await fetch(`${WITNESS}/v1/witness/cosign`, {
+  // A hub's checkpoints are signed with the hub's key, so that is the key the
+  // witness binds this log to.
+  const hubKeys = (await getJson(`${HUB}/.well-known/proofwire`)).json;
+  const cosign = (cp, logPublicKey) => fetch(`${WITNESS}/v1/witness/cosign`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', authorization: `Bearer ${witnessToken}` },
-    body: JSON.stringify({ checkpoint }),
+    body: JSON.stringify({ checkpoint: cp, ...(logPublicKey ? { logPublicKey } : {}) }),
   });
+
+  console.log('witness: refuse a first checkpoint that names no key');
+  const unnamed = await cosign(checkpoint);
+  if (unnamed.status !== 400) throw new Error(`expected 400 missing_log_key, got ${unnamed.status}`);
+
+  console.log('witness: co-sign the hub\'s checkpoint, binding the log to the hub key');
+  const res = await cosign(checkpoint, hubKeys.hub.publicKey);
   const cosigned = await res.json();
   if (!res.ok) throw new Error(`witness refused: ${res.status} ${JSON.stringify(cosigned)}`);
+  if (cosigned.logKey?.kid !== hubKeys.hub.kid || !cosigned.logKey.newlyBound) {
+    throw new Error(`expected the log to be bound to ${hubKeys.hub.kid}: ${JSON.stringify(cosigned.logKey)}`);
+  }
+
+  console.log('witness: refuse the same log offered under a different key');
+  const imposter = generateIdentity().identity;
+  const other = await cosign(checkpoint, imposter.publicKey);
+  if (other.status !== 409) throw new Error(`expected 409 log_key_mismatch, got ${other.status}`);
 
   console.log('verify it, with the witness key pinned from the witness and the log key from the hub');
-  const hubKeys = (await getJson(`${HUB}/.well-known/proofwire`)).json;
   const witnessed = { body: checkpoint.body, sigs: [...checkpoint.sigs, cosigned.signature] };
   const check = verifyCheckpoint(witnessed, { [hubKeys.hub.kid]: hubKeys.hub.publicKey }, {
     minWitnesses: 1,

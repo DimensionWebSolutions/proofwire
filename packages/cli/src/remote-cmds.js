@@ -395,7 +395,9 @@ export async function cmdCosign(args) {
   const res = await fetch(`${remote.url}/v1/witness/cosign`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({ checkpoint: cp, consistencyProof: proof }),
+    // The witness binds this log to the key that signs its first checkpoint,
+    // and holds every later one to it.
+    body: JSON.stringify({ checkpoint: cp, consistencyProof: proof, logPublicKey: localLog.identity.publicKey }),
   });
   const body = await res.json();
 
@@ -406,6 +408,15 @@ export async function cmdCosign(args) {
       out('');
       warn('A witness refusing on these grounds means the history it was shown does not');
       warn('match the history it saw before. Investigate before doing anything else.');
+    }
+    if (body.error?.code === 'log_key_mismatch') {
+      out('');
+      warn(`The witness holds this log to ${body.error.detail?.bound ?? 'a different key'}; this log signs with ${localLog.identity.kid}.`);
+      warn('If you rotated the key on purpose, send the witness operator the new public key');
+      warn('through a channel other than this witness credential, so they can rebind it:');
+      warn(`  ${localLog.identity.publicKey}`);
+      warn('If you did not, the witness is holding this log to a key you do not control — either');
+      warn('someone else signed for this log name first, or it was rebound without you. Investigate.');
     }
     out('');
     return 1;
@@ -425,6 +436,12 @@ export async function cmdCosign(args) {
     ['root', cp.body.root],
     ['witness', body.witness.kid],
     ['signatures', `${witnesses} witness${witnesses === 1 ? '' : 'es'} on this root`],
+    // Older witnesses do not bind, and say nothing here.
+    ...(body.logKey
+      ? [['log key', body.logKey.newlyBound
+          ? `${body.logKey.kid} ${c.grey('— bound now; this witness will accept no other key for this log')}`
+          : `${body.logKey.kid} ${c.grey(`— bound since ${String(body.logKey.boundAt).slice(0, 10)}`)}`]]
+      : []),
   ]);
   out('');
   info('An auditor can now require this signature, pinning the witness they trust:');

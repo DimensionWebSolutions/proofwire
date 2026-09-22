@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { randomBytes } from 'node:crypto';
+import { identityFromPublicKey } from '@proof_wire/core';
 import { Hub, DEFAULT_CONFIG } from './app.js';
 import { Auth } from './auth.js';
 import { selfTest } from './signer.js';
@@ -13,6 +14,8 @@ import {
  *   proofwire-hub serve                 start the server
  *   proofwire-hub bootstrap             create the first org, admin and keys
  *   proofwire-hub witness-key <name>    give a customer a key to this node's witness
+ *   proofwire-hub witness-rebind <customer> <log> <public key>
+ *                                       rebind a log to a rotated signing key
  *   proofwire-hub check                 verify every stored log
  *
  * PROOFWIRE_WITNESS_ONLY=1 turns the server into a witness and nothing else:
@@ -212,11 +215,10 @@ async function bootstrap() {
  * Give one customer a key to this node's witness.
  *
  * Each customer gets an organization of their own, and that is load-bearing,
- * not tidiness. A witness remembers the last root it signed per organization
- * and log name, and a co-signing request carries no signature the witness
- * checks — so two customers sharing an organization could each claim the
- * other's log name first, and the second to arrive would be refused as a
- * split view it never caused.
+ * not tidiness. A witness binds each log name, per organization, to the key
+ * that first signs a checkpoint for it — so two customers sharing an
+ * organization could each bind the other's log name to their own key first,
+ * and the second to arrive would be locked out of a log it owns.
  *
  * Running it again for the same customer adds a key rather than replacing
  * one, which is what a rotation needs: issue the new key, move the client
@@ -276,6 +278,90 @@ async function witnessKey() {
   await hub.close();
 }
 
+/**
+ * Rebind a customer's log to a new signing key, after a rotation.
+ *
+ * This is the only way a witness's log-to-key binding changes after first
+ * use, and it is deliberately not an HTTP endpoint: whoever can rebind a log
+ * can decide whose checkpoints the witness accepts for it, so it takes someone
+ * on the host, acting on a request confirmed out of band — the new public key
+ * should reach the operator through a channel other than the customer's
+ * witness credential, which is the one thing a thief would have.
+ *
+ * The recorded position is kept exactly as it was. The new key has to extend
+ * the history the witness already attested to, with a consistency proof, like
+ * any other checkpoint; rebinding is not a way to start the log over.
+ */
+async function witnessRebind() {
+  const [customer, log, publicKey] = process.argv.slice(3);
+  if (!customer || !log || !publicKey) {
+    console.error(RED('  usage: proofwire-hub witness-rebind <customer> <log> <new public key>'));
+    process.exitCode = 2;
+    return;
+  }
+  let next;
+  try {
+    next = identityFromPublicKey(publicKey);
+  } catch {
+    console.error(RED('  that is not a raw 32-byte Ed25519 public key in canonical base64url'));
+    process.exitCode = 2;
+    return;
+  }
+
+  const hub = new Hub(configFromEnv());
+  try {
+    const slug = customer.toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+    const org = hub.store.orgBySlug(slug);
+    if (!org) {
+      console.error(RED(`  no customer "${slug}" on this witness`));
+      process.exitCode = 1;
+      return;
+    }
+
+    const witnessKid = hub.witnessSigner.kid;
+    const positionKey = `${org.id}:${log}`;
+    const previous = hub.store.witnessBinding(witnessKid, positionKey);
+    const position = hub.store.witnessPosition(witnessKid, positionKey);
+    if (!previous && !position) {
+      // Nothing to rebind: the log's next checkpoint binds on first use.
+      console.error(RED(`  this witness has never co-signed for ${log} under ${slug}`));
+      console.error(DIM('  Nothing to rebind — its next checkpoint will bind whichever key signs it.'));
+      process.exitCode = 1;
+      return;
+    }
+    if (previous?.kid === next.kid) {
+      console.error(DIM(`  ${log} is already bound to ${next.kid}; nothing changed.`));
+      return;
+    }
+
+    hub.store.bindWitnessLogKey({
+      witnessKid, positionKey, kid: next.kid, publicKey: next.publicKey, by: 'operator',
+    });
+    hub.store.recordEvent({
+      orgId: org.id,
+      actor: 'witness-rebind',
+      actorKind: 'system',
+      action: 'witness.rebind',
+      subject: log,
+      meta: { from: previous?.kid ?? null, to: next.kid, size: position?.size ?? null },
+    });
+
+    console.error('');
+    console.error(B('  Log rebound'));
+    console.error(DIM('  ─────────────────────────────────────────────'));
+    console.error(`  customer   ${slug}`);
+    console.error(`  log        ${log}`);
+    console.error(`  from       ${previous?.kid ?? DIM('(no key bound yet)')}`);
+    console.error(`  to         ${next.kid}`);
+    if (position) {
+      console.error(`  position   size ${position.size}, root ${position.root.slice(0, 16)}… ${DIM('— kept')}`);
+    }
+    console.error('');
+  } finally {
+    await hub.close();
+  }
+}
+
 /** Verify every stored log and exit non-zero if any fails. */
 async function check() {
   const hub = new Hub(configFromEnv());
@@ -313,6 +399,7 @@ const COMMANDS = {
   serve,
   bootstrap,
   'witness-key': witnessKey,
+  'witness-rebind': witnessRebind,
   check,
   backup: cmdBackup,
   'verify-backup': cmdVerifyBackup,

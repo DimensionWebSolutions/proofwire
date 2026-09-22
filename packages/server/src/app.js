@@ -6,6 +6,8 @@ import {
   verifyCheckpoint,
   checkpointDigest,
   sign as signBytes,
+  verify as verifyBytes,
+  identityFromPublicKey,
   unhex,
   hex,
   verifyConsistency,
@@ -477,6 +479,15 @@ export class Hub {
      * the last root it signed for that log, and never signs a second, different
      * root at a size it has already seen. Those two rules are what make a split
      * view impossible without the witness's complicity.
+     *
+     * And it only takes a log's checkpoints from the log. The first request
+     * for a log names the key its checkpoints are signed with
+     * (`logPublicKey`); the witness checks that signature and binds the log to
+     * that key. From then on a checkpoint must carry a valid `log` signature
+     * from the bound key, or it is refused before its position is even looked
+     * at. Without this, a witness's memory of a log belongs to whoever reaches
+     * it first with a well-formed body. A key rotation is rebound on the host
+     * (`proofwire-hub witness-rebind`), never over this endpoint.
      */
     r.post('/v1/witness/cosign', async (ctx) => {
       requireScope(ctx.principal, 'witness:sign');
@@ -486,8 +497,26 @@ export class Hub {
         throw new StoreError(400, 'missing_checkpoint', 'body must be { checkpoint: {...} }');
       }
 
+      /** @type {{ kid: string, publicKey: string }|null} */
+      let offered = null;
+      if (ctx.body?.logPublicKey !== undefined && ctx.body?.logPublicKey !== null) {
+        try {
+          offered = identityFromPublicKey(String(ctx.body.logPublicKey));
+        } catch {
+          throw new StoreError(
+            400,
+            'bad_log_key',
+            'logPublicKey must be the log signer\'s raw 32-byte Ed25519 public key, canonical base64url',
+          );
+        }
+      }
+
       const { body } = checkpoint;
       const logKey = `${ctx.principal.orgId}:${body.log}`;
+      const witnessKid = this.witnessSigner.kid;
+      /** @type {{ kid: string, bound_at: string, bound_by: string }} */
+      let binding;
+      let newlyBound = false;
 
       // Validate and *claim* the position in one transaction, then sign
       // outside it.
@@ -499,10 +528,52 @@ export class Hub {
       // thing it exists to refuse. Claiming first also fails in the safe
       // direction: if signing then errors, the position is already taken, so a
       // later *different* root at that size is still refused.
+      //
+      // The key binding is read, checked and — on first use — written inside
+      // the same transaction, for the same reason: two first requests naming
+      // different keys must not both bind.
       transact(this.db, () => {
-        const prior = this.db
-          .prepare('SELECT * FROM witness_state WHERE witness_kid = ? AND log_id = ?')
-          .get(this.witnessSigner.kid, logKey);
+        const bound = this.store.witnessBinding(witnessKid, logKey);
+        if (bound && offered && offered.kid !== bound.kid) {
+          throw new StoreError(
+            409,
+            'log_key_mismatch',
+            `this witness has ${body.log} bound to ${bound.kid}, not ${offered.kid}. If the log's ` +
+              `key was rotated on purpose, the witness operator rebinds it: ` +
+              `proofwire-hub witness-rebind <customer> ${body.log} <new public key>`,
+            { bound: bound.kid, offered: offered.kid },
+          );
+        }
+        if (!bound && !offered) {
+          throw new StoreError(
+            400,
+            'missing_log_key',
+            `this witness has not co-signed for ${body.log} before, so the request must name the key ` +
+              `its checkpoints are signed with: { checkpoint, logPublicKey }. (pw 0.2.0 does not ` +
+              `send it; upgrade the CLI.)`,
+          );
+        }
+        const key = bound ? { kid: bound.kid, publicKey: bound.public_key } : offered;
+
+        // Checked before the position, so a checkpoint the log never signed
+        // cannot move, or even probe, what the witness remembers.
+        const logSig = Array.isArray(checkpoint.sigs)
+          ? checkpoint.sigs.find((s) => s && s.role === 'log' && s.kid === key.kid)
+          : undefined;
+        if (
+          !logSig ||
+          typeof logSig.sig !== 'string' ||
+          !verifyBytes(key.publicKey, checkpointDigest(body), logSig.sig)
+        ) {
+          throw new StoreError(
+            422,
+            'bad_log_signature',
+            `the checkpoint carries no valid log signature from ${key.kid}` +
+              (bound ? `, the key this witness has ${body.log} bound to` : ''),
+          );
+        }
+
+        const prior = this.store.witnessPosition(witnessKid, logKey);
 
         if (prior) {
           if (body.size < prior.size) {
@@ -556,7 +627,14 @@ export class Hub {
              ON CONFLICT(witness_kid, log_id) DO UPDATE SET
                size = excluded.size, root = excluded.root, updated_at = excluded.updated_at`,
           )
-          .run(this.witnessSigner.kid, logKey, body.size, body.root, now());
+          .run(witnessKid, logKey, body.size, body.root, now());
+
+        // A position recorded before bindings existed is bound here too, on its
+        // next co-signing — the same first-use rule, applied late.
+        binding = bound ?? this.store.bindWitnessLogKey({
+          witnessKid, positionKey: logKey, kid: key.kid, publicKey: key.publicKey, by: 'first-use',
+        });
+        newlyBound = !bound;
       });
 
       const sig = {
@@ -579,6 +657,7 @@ export class Hub {
       return {
         signature: sig,
         witness: { kid: this.witnessSigner.kid, publicKey: this.witnessSigner.publicKey },
+        logKey: { kid: binding.kid, boundAt: binding.bound_at, boundBy: binding.bound_by, newlyBound },
       };
     });
 

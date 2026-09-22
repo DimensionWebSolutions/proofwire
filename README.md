@@ -113,7 +113,7 @@ What the hub adds:
 | **Shared policy** | Versioned, immutable, rolled back by version. Agents fetch the active one and record its hash in every receipt. |
 | **Approvals inbox** | Escalations reach a human in the console. Undecided requests expire into a denial — never into an approval. |
 | **Tenant isolation** | Every row names its org. A credential cannot reach another organisation's data by any route, including by guessing an id. |
-| **Witness service** | Counter-signs roots, and refuses two roots at one size. This is what defeats a split view. |
+| **Witness service** | Counter-signs only roots signed by the key it bound the log to, and refuses two roots at one size. This is what defeats a split view. |
 | **Its own audit trail** | Every administrative action is hash-chained. We ask you to trust a tamper-evident record, so ours is one too. |
 
 **The hub is not trusted and does not need to be.** It never holds a signing
@@ -359,7 +359,7 @@ not ready for production.
 ## Status
 
 `0.2.0` — cryptography, policy engine, proxy, CLI, and the multi-tenant hub are
-complete and covered by **289 tests**: the published RFC 6962 Certificate
+complete and covered by **308 tests**: the published RFC 6962 Certificate
 Transparency reference tree and RFC 8032 Ed25519 vectors, exhaustive Merkle
 proof verification for every tree size up to 128 and every `(m, n)` consistency
 pair up to 48, and end-to-end tests that run a real agent through a real proxy
