@@ -3,6 +3,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { binProblems } from './check-bins.mjs';
 
 /**
  * Publish the workspace to npm, in dependency order, with the checks that
@@ -135,6 +136,7 @@ function preflight() {
   const dirty = run('git', ['status', '--porcelain']).trim();
   if (dirty) {
     console.log(`  ${YELLOW('!')} git    working tree is dirty`);
+    for (const line of dirty.split('\n').slice(0, 10)) console.log(`           ${DIM(line)}`);
     blocking.push('Commit or stash first, so the published code matches a commit.');
   } else {
     console.log(`  ${GREEN('✓')} git    working tree clean`);
@@ -149,7 +151,20 @@ function preflight() {
     console.log(`  ${GREEN('✓')} vers   all at ${B([...versions][0])}`);
   }
 
-  // 5. Tests. The last chance to find out before it is permanent.
+  // 5. Executables that will actually run where they are installed.
+  const bins = binProblems(ROOT, ORDER);
+  if (bins.length) {
+    console.log(`  ${RED('✗')} bins   ${bins.length} problem(s)`);
+    for (const p of bins) console.log(`           ${p}`);
+    blocking.push(
+      'Fix the executables first. For a CRLF #! line, re-check the file out with the\n' +
+        '     LF .gitattributes rule applied — `git checkout -- <file>`, once the tree is clean.',
+    );
+  } else {
+    console.log(`  ${GREEN('✓')} bins   every #! line is LF`);
+  }
+
+  // 6. Tests. The last chance to find out before it is permanent.
   if (skipTests) {
     console.log(`  ${YELLOW('!')} tests  skipped`);
   } else {

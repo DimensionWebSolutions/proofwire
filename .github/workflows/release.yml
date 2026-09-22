@@ -26,7 +26,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
       - run: npm test
         env:
           PROOFWIRE_ACCESS_LOG: 'off'
@@ -43,10 +43,14 @@ jobs:
       # so anyone can check which commit and workflow produced it.
       id-token: write
     env:
-      # Job-level so steps can branch on whether it exists. Without it, a
-      # release is published from a maintainer's machine (`npm run release`,
-      # with a 2FA code) and only then tagged; see docs/PUBLISHING.md.
-      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      # Whether an NPM_TOKEN secret exists, as a flag of its own. Branching on
+      # NODE_AUTH_TOKEN does not work: actions/setup-node sets it to a
+      # placeholder (XXXXX-XXXXX-XXXXX-XXXXX) when no token is configured, so it
+      # is never empty — which is how the 0.3.0 tag push ran Publish without a
+      # token. Without one, a release is published from a maintainer's machine
+      # (`npm run release`, with a 2FA code) and only then tagged; see
+      # docs/PUBLISHING.md.
+      HAS_NPM_TOKEN: ${{ secrets.NPM_TOKEN != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -54,7 +58,7 @@ jobs:
           node-version: '24'
           registry-url: 'https://registry.npmjs.org'
 
-      - run: npm install --no-audit --no-fund
+      - run: npm ci --no-audit --no-fund
 
       - name: Confirm the tag matches the manifests
         if: startsWith(github.ref, 'refs/tags/v')
@@ -68,23 +72,27 @@ jobs:
           echo "releasing $PKG"
 
       - name: Publish
-        if: env.NODE_AUTH_TOKEN != ''
+        if: env.HAS_NPM_TOKEN == 'true'
         run: node scripts/release.js ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }} --skip-tests
         env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           # Attach provenance to every tarball.
           NPM_CONFIG_PROVENANCE: true
 
       - name: Or confirm it was already published by hand
         # A GitHub release says "this version exists"; it only gets made if
         # every package at the tagged version is genuinely on npm.
-        if: env.NODE_AUTH_TOKEN == '' && startsWith(github.ref, 'refs/tags/v')
+        if: env.HAS_NPM_TOKEN != 'true' && startsWith(github.ref, 'refs/tags/v')
         run: |
           V="${GITHUB_REF_NAME#v}"
           missing=0
           for p in packages/*/package.json; do
             [ "$(node -p "require('./$p').private === true")" = true ] && continue
             n="$(node -p "require('./$p').name")"
-            if [ "$(npm view "$n@$V" version 2>/dev/null || true)" = "$V" ]; then
+            # Anonymous, and not through npm: setup-node's .npmrc sends its
+            # placeholder token, which the registry can answer with a 401.
+            status="$(curl -s -o /dev/null -w '%{http_code}' "https://registry.npmjs.org/${n/\//%2f}/$V")"
+            if [ "$status" = 200 ]; then
               echo "on npm: $n@$V"
             else
               echo "::error::$n@$V is not on npm"

@@ -1,0 +1,15 @@
+# Check text out with LF everywhere, whatever core.autocrlf says.
+#
+# Not tidiness: a bin script's `#!/usr/bin/env node` line with a CR after it
+# makes Linux and macOS look for a program called `node\r`, and npm publishes
+# the working copy — so a release published from a default Windows checkout
+# would ship commands that fail everywhere but Windows. scripts/release.js
+# refuses to publish one; this stops it being created.
+* text=auto eol=lf
+
+*.woff2 binary
+*.woff binary
+*.tgz binary
+*.png binary
+*.ico binary
+*.db binary
