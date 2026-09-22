@@ -172,3 +172,50 @@ test('the page is well-formed enough to be found and shared', () => {
   const ids = attrs(INDEX, 'id');
   assert.equal(new Set(ids).size, ids.length, `duplicate ids: ${ids.filter((x, i) => ids.indexOf(x) !== i)}`);
 });
+
+test('paid tiers never look purchasable, since nothing is', () => {
+  // The one thing worse than no pricing page is one that quietly starts
+  // implying a checkout exists. Every non-"Open" tier's call to action must
+  // go to the waitlist issue form, not somewhere that looks transactional,
+  // and must carry its own "not live yet" disclaimer right next to it.
+  //
+  // Plain indexOf/slice rather than one clever regex: the block nests a
+  // variable amount of markup per card, and a regex built to match its exact
+  // shape breaks the moment that shape changes — indexOf on markers that are
+  // true by construction (every card opens with the same class, the whole
+  // block ends at the next 2-space-indented </div>) does not.
+  const open = INDEX.indexOf('<div class="tiers">');
+  assert.ok(open !== -1, 'could not find the .tiers block');
+  const close = INDEX.indexOf('\n  </div>', open);
+  assert.ok(close !== -1, 'could not find the end of the .tiers block');
+  const tiersBlock = INDEX.slice(open, close);
+
+  const starts = [...tiersBlock.matchAll(/<div class="tier( now)?">/g)];
+  assert.ok(starts.length >= 4, `expected at least 4 tier cards, found ${starts.length}`);
+  const cards = starts.map((m, i) => ({
+    isNow: m[1] === ' now',
+    body: tiersBlock.slice(m.index, starts[i + 1]?.index ?? tiersBlock.length),
+  }));
+
+  for (const { isNow, body } of cards) {
+    const cta = body.match(/<a class="btn[^"]*" href="([^"]+)"[^>]*>([^<]+)<\/a>/);
+    assert.ok(cta, `a tier card has no call-to-action button:\n${body.slice(0, 200)}`);
+    // href is raw HTML source text — "&amp;" between query params, correctly,
+    // is what a browser decodes to "&" before ever handing it to JavaScript.
+    const [, rawHref, label] = cta;
+    const href = rawHref.replace(/&amp;/g, '&');
+
+    if (isNow) {
+      // The one tier that exists today may link into the page itself.
+      assert.match(href, /^#/, `the available tier's CTA should be an in-page link, got ${href}`);
+      continue;
+    }
+
+    assert.ok(
+      href.startsWith('https://github.com/proofwire/proofwire/issues/new?') && /[?&]labels=waitlist(?:&|$)/.test(href),
+      `"${label}" (href="${href}") does not open a labelled waitlist issue`,
+    );
+    assert.doesNotMatch(label, /buy|purchase|subscribe|checkout|start (trial|now)/i, `"${label}" reads as purchasable`);
+    assert.match(body, /not yet live/i, `a paid tier's card has no "not yet live" disclaimer`);
+  }
+});

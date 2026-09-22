@@ -205,6 +205,22 @@
   .prop .k { font-family: var(--mono); font-size: .7rem; color: var(--verify); letter-spacing: .06em; text-transform: uppercase; display: block; margin-bottom: 7px; }
   .prop p { margin: 0; font-size: .92rem; line-height: 1.55; color: var(--ink-2); }
   .prop p strong { color: var(--ink); }
+
+  /* ── pricing ── */
+  .tiers { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 28px; }
+  @media (min-width: 700px) { .tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+  @media (min-width: 1100px) { .tiers { grid-template-columns: repeat(5, minmax(0, 1fr)); } }
+  .tier { display: flex; flex-direction: column; background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; padding: 20px; }
+  .tier.now { border-color: var(--verify); box-shadow: inset 0 0 0 1px var(--verify); }
+  .tier .k { font-family: var(--mono); font-size: .7rem; color: var(--ink-3); letter-spacing: .08em; text-transform: uppercase; }
+  .tier.now .k { color: var(--verify); }
+  .tier h3 { margin: 6px 0 2px; font-size: 1.28rem; }
+  .tier .for { margin: 0 0 14px; font-size: .84rem; color: var(--ink-2); min-height: 2.6em; }
+  .tier ul { list-style: none; margin: 0 0 18px; padding: 0; display: grid; gap: 7px; flex-grow: 1; }
+  .tier li { font-size: .84rem; color: var(--ink-2); padding-left: 16px; position: relative; }
+  .tier li::before { content: "+"; position: absolute; left: 0; color: var(--verify); font-family: var(--mono); }
+  .tier .btn, .tier .btn-sm { width: 100%; justify-content: center; }
+  .tier .soon { margin: 8px 0 0; font-size: .74rem; color: var(--ink-3); text-align: center; }
   .table-scroll { overflow-x: auto; border: 1px solid var(--rule); border-radius: 3px; background: var(--paper); }
   .table-scroll table { min-width: 560px; }
   td.attack { font-weight: 600; font-family: var(--sans); font-size: .86rem; }
@@ -249,6 +265,7 @@
       <a href="#verify">Verify</a>
       <a class="opt" href="#how">How it works</a>
       <a class="opt" href="#hub">Hub</a>
+      <a class="opt" href="#pricing">Pricing</a>
       <a href="#limits">Limits</a>
       <a class="opt" href="#start">Start</a>
     </nav>
@@ -590,6 +607,98 @@ $ pw proxy --namespace crm -- npx -y @acme/mcp-crm
 
 <div class="divide"></div>
 
+<!-- ── pricing ──────────────────────────────────────────────────────── -->
+<section class="wrap" id="pricing">
+  <h2>What's free, and what won't be.</h2>
+  <p class="lede measure" style="margin-bottom:0">
+    The line is drawn on a principle, not on feature-gating:
+    <strong>evidence you cannot verify without a vendor's permission is not
+    evidence.</strong> Everything that makes a receipt independently checkable
+    is free forever. What gets sold is infrastructure and independence —
+    hosted witnesses, retention, and the parts a compliance team asks for by
+    name.
+  </p>
+
+  <div class="tiers">
+    <div class="tier now">
+      <span class="k">Available now</span>
+      <h3>Open</h3>
+      <p class="for">Self-hosted, self-witnessed. Complete and unlimited — this is everything on this page.</p>
+      <ul>
+        <li>Receipt format, spec, verifier</li>
+        <li>Policy engine, MCP proxy, CLI</li>
+        <li>Self-hosted log and hub</li>
+        <li>Apache-2.0, forever</li>
+      </ul>
+      <a class="btn btn-solid" href="#start">Start free</a>
+    </div>
+    <div class="tier">
+      <span class="k">$99/mo</span>
+      <h3>Team</h3>
+      <p class="for">A team that wants an independent witness without running one.</p>
+      <ul>
+        <li>3 hosted witnesses</li>
+        <li>1M receipts/mo, 1yr retention</li>
+        <li>Slack approvals</li>
+      </ul>
+      <a class="btn-sm" href="https://github.com/proofwire/proofwire/issues/new?labels=waitlist&amp;title=Waitlist%3A%20Team%20%28%2499%2Fmo%29&amp;body=Interested%20in%20the%20Team%20tier%3A%203%20hosted%20witnesses%2C%201M%20receipts%2Fmo%2C%201yr%20retention%2C%20Slack%20approvals.%0A%0AWhat%20you%27re%20running%2C%20roughly%20how%20many%20actions%2Fmo%2C%20and%20how%20you%27d%20like%20to%20be%20reached%3A%0A">Get notified</a>
+      <p class="soon">Not yet live — see below</p>
+    </div>
+    <div class="tier">
+      <span class="k">$999/mo</span>
+      <h3>Business</h3>
+      <p class="for">Compliance exports and SSO, for the team an auditor is now asking about.</p>
+      <ul>
+        <li>5 witnesses across orgs</li>
+        <li>25M receipts, 7yr retention</li>
+        <li>AI Act / SOC 2 / ISO 42001 exports, SSO</li>
+      </ul>
+      <a class="btn-sm" href="https://github.com/proofwire/proofwire/issues/new?labels=waitlist&amp;title=Waitlist%3A%20Business%20%28%24999%2Fmo%29&amp;body=Interested%20in%20the%20Business%20tier%3A%205%20witnesses%20across%20orgs%2C%2025M%20receipts%2C%207yr%20retention%2C%20compliance%20exports%2C%20SSO.%0A%0AWhat%20you%27re%20running%2C%20roughly%20how%20many%20actions%2Fmo%2C%20and%20how%20you%27d%20like%20to%20be%20reached%3A%0A">Get notified</a>
+      <p class="soon">Not yet live — see below</p>
+    </div>
+    <div class="tier">
+      <span class="k">From $60k/yr</span>
+      <h3>Enterprise</h3>
+      <p class="for">Your keys never leave your custody, and neither does your data's retention policy.</p>
+      <ul>
+        <li>BYOK / HSM, key rotation</li>
+        <li>Private witnesses, custom retention</li>
+        <li>Audit support, SLA</li>
+      </ul>
+      <a class="btn-sm" href="https://github.com/proofwire/proofwire/issues/new?labels=waitlist&amp;title=Waitlist%3A%20Enterprise&amp;body=Enterprise%20inquiry%3A%20BYOK%2FHSM%2C%20private%20witnesses%2C%20custom%20retention%2C%20audit%20support%2C%20SLA.%0A%0ACompany%2C%20rough%20scale%2C%20and%20how%20you%27d%20like%20to%20be%20reached%3A%0A">Talk to us</a>
+      <p class="soon">Not yet live — see below</p>
+    </div>
+    <div class="tier">
+      <span class="k">Revenue share</span>
+      <h3>Witness operator</h3>
+      <p class="for">Run a node. An audit firm, insurer or consortium is worth more as a witness than as a customer.</p>
+      <ul>
+        <li>You hold the key, not us</li>
+        <li>A distribution channel and a node</li>
+        <li>First movers set the terms</li>
+      </ul>
+      <a class="btn-sm" href="https://github.com/proofwire/proofwire/issues/new?labels=waitlist&amp;title=Waitlist%3A%20Witness%20operator&amp;body=Interested%20in%20running%20an%20independent%20witness%20node%20%28revenue%20share%29.%20We%20are%20an%20audit%20firm%20%2F%20insurer%20%2F%20other%3A%0A%0AHow%20you%27d%20like%20to%20be%20reached%3A%0A">Talk to us</a>
+      <p class="soon">Not yet live — see below</p>
+    </div>
+  </div>
+
+  <p class="measure" style="margin-top:24px;font-size:.92rem;color:var(--ink-2)">
+    Only <strong>Open</strong> exists today — it's everything on this page, and it
+    stays free and unlimited regardless of what ships next. The hosted tiers
+    need real infrastructure and, for the witness network to mean anything,
+    real independent operators — not just more code — so they aren't live
+    yet. <strong>Get notified</strong> opens a public GitHub issue (no account
+    required to read it, one to post); if you'd rather not post publicly,
+    <a href="https://github.com/proofwire/proofwire/blob/main/SECURITY.md">SECURITY.md</a>
+    has the private route. The full reasoning — pricing, unit economics, why
+    the witness network and not the code is the moat — is in
+    <a href="https://github.com/proofwire/proofwire/blob/main/BUSINESS.md">BUSINESS.md</a>,
+    written to be argued with.
+  </p>
+</section>
+
+<div class="divide"></div>
+
 <!-- ── limits ───────────────────────────────────────────────────────── -->
 <section class="wrap" id="limits">
   <h2>What it doesn't do.</h2>
@@ -601,7 +710,7 @@ $ pw proxy --namespace crm -- npx -y @acme/mcp-crm
     <li><strong>It cannot stop someone with the signing key writing false receipts going forward.</strong> It can stop them rewriting the past, once a checkpoint has been witnessed. Keep the key in a KMS.</li>
     <li><strong>Witnesses are only as independent as you make them.</strong> Three witnesses on infrastructure you control are one witness.</li>
     <li><strong>A restored hub cannot detect its own staleness.</strong> The evidence was in the data the restore discarded; only an agent or an auditor holding later evidence can see the gap.</li>
-    <li><strong>There is no hosted service.</strong> You run everything yourself, and the hub's Dockerfile has not yet been built in CI.</li>
+    <li><strong>There is no hosted service.</strong> You run everything yourself — the Dockerfile is built, driven end to end and smoke-tested in CI on every push, but nobody operates it for you yet.</li>
   </ul>
 
   <details class="more">
