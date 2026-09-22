@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { randomBytes } from 'node:crypto';
 import { identityFromPublicKey } from '@proof_wire/core';
-import { Hub, DEFAULT_CONFIG } from './app.js';
+import { Hub, DEFAULT_CONFIG, VERSION } from './app.js';
 import { Auth } from './auth.js';
 import { selfTest } from './signer.js';
 import {
@@ -56,7 +56,7 @@ async function serve() {
 
   const witnessOnly = hub.config.witnessOnly;
   console.error('');
-  console.error(B(witnessOnly ? '  Proofwire witness' : '  Proofwire hub') + DIM('  0.2.0'));
+  console.error(B(witnessOnly ? '  Proofwire witness' : '  Proofwire hub') + DIM(`  ${VERSION}`));
   console.error(DIM(`  ${url}`));
   console.error(DIM(`  db       ${hub.config.database}`));
   if (!witnessOnly) console.error(DIM(`  hub key  ${hub.hubSigner.kid}  [${hub.hubSigner.kind}]`));

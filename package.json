@@ -1,6 +1,6 @@
 {
   "name": "proofwire-monorepo",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
   "type": "module",
   "description": "Proofwire — tamper-evident, independently verifiable receipts for AI agent actions.",

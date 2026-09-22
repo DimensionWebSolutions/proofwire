@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
 import {
   Policy,
@@ -37,6 +38,9 @@ import { renderConsole } from './console.js';
  * humans resolve escalations, auditors pull proofs, witnesses counter-sign.
  * Everything else is plumbing around those four jobs.
  */
+
+/** This package's version, as published — read, not typed, so it cannot drift. */
+export const VERSION = createRequire(import.meta.url)('../package.json').version;
 
 export const DEFAULT_CONFIG = {
   port: 8787,
@@ -251,7 +255,7 @@ export class Hub {
       if (this.config.witnessOnly) {
         return {
           service: 'proofwire-witness',
-          version: '0.2.0',
+          version: VERSION,
           witness: { kid: this.witnessSigner.kid, publicKey: this.witnessSigner.publicKey },
           keys: keys.filter((k) => k.role === 'witness'),
           receiptVersion: 1,
@@ -259,7 +263,7 @@ export class Hub {
       }
       return {
         service: 'proofwire-hub',
-        version: '0.2.0',
+        version: VERSION,
         hub: { kid: this.hubSigner.kid, publicKey: this.hubSigner.publicKey },
         witness: { kid: this.witnessSigner.kid, publicKey: this.witnessSigner.publicKey },
         keys,

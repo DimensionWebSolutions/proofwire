@@ -32,13 +32,24 @@ somewhere you control.
 
 ---
 
-## Path 1 — from your machine, once
+## Path 1 — from your machine
+
+How 0.2.0 and 0.3.0 were released. Before any release, bump every package
+and the internal `@proof_wire/*` pins together, and add the version's section
+to `CHANGELOG.md` — it becomes the GitHub release notes.
 
 ```bash
 npm login                       # opens a browser
 node scripts/release.js --dry-run
-npm run release
+npm run release                 # asks for a 2FA code per package
+git tag -a v0.3.0 -m "Proofwire 0.3.0" && git push origin v0.3.0
 ```
+
+Tag *after* publishing. The tag push runs `.github/workflows/release.yml`,
+which, with no `NPM_TOKEN` secret, re-runs the suite on three operating
+systems, confirms every package at the tagged version is genuinely on npm, and
+creates the GitHub release from that version's `CHANGELOG.md` section. Push
+the tag first and it fails, saying what isn't published yet.
 
 ### First time only: create the scope
 
@@ -100,7 +111,8 @@ git push && git push --tags
 
 The tag triggers `.github/workflows/release.yml`, which re-runs the full suite
 on three operating systems, checks the tag matches the manifests, publishes
-with provenance, and opens a GitHub release with generated notes.
+with provenance, and creates the GitHub release from that version's
+`CHANGELOG.md` section.
 
 Try it first with **Actions → Release → Run workflow → dry run: true**.
 

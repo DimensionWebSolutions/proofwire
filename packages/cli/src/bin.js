@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import fs from 'node:fs';
+import { createRequire } from 'node:module';
 import path from 'node:path';
 import { ProofLog, verifyBundle, Policy, verifyInclusion, unhex, generateIdentity } from '@proof_wire/core';
 import { McpProxy, auditPolicyMetrics } from '@proof_wire/proxy';
@@ -11,7 +12,10 @@ import {
   cmdRemote, cmdPush, cmdRemoteVerify, cmdPolicy, cmdCosign, loadRemotes, resolveRemote,
 } from './remote-cmds.js';
 
-const VERSION = '0.2.0';
+// Read from the package, not written here: a version typed into source is one
+// more place for a release to forget, and `pw --version` lying is worse than
+// it saying nothing.
+const { version: VERSION } = createRequire(import.meta.url)('../package.json');
 const CONFIG = 'proofwire.config.json';
 const POLICY = 'proofwire.policy.json';
 

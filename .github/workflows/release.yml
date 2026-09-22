@@ -37,10 +37,16 @@ jobs:
     needs: verify
     runs-on: ubuntu-latest
     permissions:
-      contents: read
+      # write, because the last step creates the GitHub release.
+      contents: write
       # Required for npm provenance: the tarball is signed against this run,
       # so anyone can check which commit and workflow produced it.
       id-token: write
+    env:
+      # Job-level so steps can branch on whether it exists. Without it, a
+      # release is published from a maintainer's machine (`npm run release`,
+      # with a 2FA code) and only then tagged; see docs/PUBLISHING.md.
+      NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -62,14 +68,45 @@ jobs:
           echo "releasing $PKG"
 
       - name: Publish
+        if: env.NODE_AUTH_TOKEN != ''
         run: node scripts/release.js ${{ github.event.inputs.dry_run == 'true' && '--dry-run' || '' }} --skip-tests
         env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           # Attach provenance to every tarball.
           NPM_CONFIG_PROVENANCE: true
+
+      - name: Or confirm it was already published by hand
+        # A GitHub release says "this version exists"; it only gets made if
+        # every package at the tagged version is genuinely on npm.
+        if: env.NODE_AUTH_TOKEN == '' && startsWith(github.ref, 'refs/tags/v')
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          missing=0
+          for p in packages/*/package.json; do
+            [ "$(node -p "require('./$p').private === true")" = true ] && continue
+            n="$(node -p "require('./$p').name")"
+            if [ "$(npm view "$n@$V" version 2>/dev/null || true)" = "$V" ]; then
+              echo "on npm: $n@$V"
+            else
+              echo "::error::$n@$V is not on npm"
+              missing=1
+            fi
+          done
+          if [ "$missing" != 0 ]; then
+            echo "::error::Publish $V first (npm run release), then push the tag — or add an NPM_TOKEN secret."
+            exit 1
+          fi
 
       - name: Create the GitHub release
         if: startsWith(github.ref, 'refs/tags/v') && github.event.inputs.dry_run != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        run: |
+          V="${GITHUB_REF_NAME#v}"
+          # This version's section of CHANGELOG.md, written by a person, over
+          # notes generated from commit titles.
+          awk -v v="$V" 'index($0, "## " v " ") == 1 { found = 1; next } found && /^## / { exit } found' CHANGELOG.md > notes.md
+          if [ -s notes.md ]; then
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "Proofwire $V" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --verify-tag --title "Proofwire $V" --generate-notes
+          fi

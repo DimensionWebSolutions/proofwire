@@ -1,6 +1,6 @@
 {
   "name": "@proof_wire/server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "Proofwire hub — multi-tenant transparency log, policy registry, approvals, and witness service.",
   "license": "Apache-2.0",
@@ -27,7 +27,7 @@
     "src"
   ],
   "dependencies": {
-    "@proof_wire/core": "0.2.0"
+    "@proof_wire/core": "0.3.0"
   },
   "engines": {
     "node": ">=22.13"

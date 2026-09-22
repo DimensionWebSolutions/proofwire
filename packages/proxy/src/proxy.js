@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { createRequire } from 'node:module';
 import { LineFramer, encode, isRequest, isResponse, toolRefusal } from './jsonrpc.js';
 import { History, redact, entryHash } from '@proof_wire/core';
 
@@ -17,7 +18,9 @@ import { History, redact, entryHash } from '@proof_wire/core';
  * a proxy that only forwards what it recognises breaks on the next release.
  */
 
-const RUNTIME = 'proofwire-proxy/0.2.0';
+// Stamped into every receipt's actor.runtime, so it must name the version that
+// actually produced the receipt — read from the package, never typed here.
+const RUNTIME = `proofwire-proxy/${createRequire(import.meta.url)('../package.json').version}`;
 
 /**
  * Pull a dotted path out of an object.

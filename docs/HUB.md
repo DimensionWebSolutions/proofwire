@@ -21,7 +21,7 @@ do exactly three dishonest things, and each has a defence:
 | --- | --- |
 | Alter a receipt | The signature fails. Ingest rejects it; so does any later audit. |
 | Drop or reorder receipts | The chain breaks at the next entry, and consistency proofs against a published checkpoint expose the gap. |
-| Show two customers two histories | Witness countersignatures. A witness signs only roots that extend the last one it saw, and refuses two roots at one size. |
+| Show two customers two histories | Witness countersignatures. A witness signs only roots signed by the key it bound the log to, that extend the last one it saw, and refuses two roots at one size. |
 
 The corollary matters as much: **the hub is optional.** An agent whose hub is
 unreachable keeps running and keeps recording locally, and ships the backlog
@@ -412,7 +412,7 @@ so re-run `pw push` from each to refill the gap.
 
 ### Scaling
 
-`0.2.0` is single-writer per process. SQLite in WAL mode handles concurrent
+`0.3.0` is single-writer per process. SQLite in WAL mode handles concurrent
 readers comfortably, and ingest is a few hundred microseconds of verification
 plus one transaction. For more than one hub process, shard by organisation —
 each log has exactly one writer by design, so sharding is natural and needs no
@@ -496,7 +496,7 @@ On `409 sequence_gap` the error carries the sequence to resume from. The
 
 ---
 
-## Known limits in 0.2.0
+## Known limits in 0.3.0
 
 Stated plainly, because a security product that hides its edges is selling
 confidence rather than evidence.
@@ -517,3 +517,7 @@ confidence rather than evidence.
    resets. SAML/OIDC is planned.
 6. **`node:sqlite` is still marked experimental** upstream. It is stable in
    practice and the API surface used here is small, but it is worth knowing.
+7. **A witness trusts the first key it sees for a log name.** It binds the log
+   to that key and holds it to it afterwards, but the first binding itself is
+   trust on first use. Each customer having their own organization on the
+   witness is what keeps one customer from binding another's log names.

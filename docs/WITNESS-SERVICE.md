@@ -147,9 +147,8 @@ Three things that are true of a witness and not obviously true of a hub:
   rather than start over. Positions from before the change bind on their next
   successful co-signing. What's still first-use: the *first* key to reach the
   witness for a log name wins, which is why per-customer organizations stay.
-  And it's a wire change: the published `pw` 0.2.0 doesn't send
-  `logPublicKey`, so it can't start witnessing a new log against an upgraded
-  witness until the CLI is re-released.
+  And it's a wire change: `pw` 0.2.0 doesn't send `logPublicKey`, so it
+  can't start witnessing a new log against a 0.3.0 witness; `pw` 0.3.0 does.
 - **Key custody.** A self-hosted operator can accept a local key file; a
   service Proofwire operates and charges money for should not have its
   witness key sitting in a container's SQLite file. `signer.js`'s
