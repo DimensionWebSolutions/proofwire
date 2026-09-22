@@ -9,9 +9,12 @@ Two paths. The second is the one to use once it is set up.
 - The repository is live and public in the `proofwire` organisation, with
   GitHub's private vulnerability reporting on, so the link in
   [`SECURITY.md`](../SECURITY.md) works.
-- Version 0.2.0 of all five packages is on npm: `proofwire` and the four
-  `@proof_wire/*` libraries. A clean `npm install proofwire@0.2.0` from the
-  public registry was run and the installed CLI ran (`pw init`).
+- 0.3.0 of all five packages is on npm — `proofwire` and the four
+  `@proof_wire/*` libraries — built from `v0.3.0` (npm's recorded `gitHead`
+  is the tagged commit), with a GitHub release carrying its `CHANGELOG.md`
+  section. A clean global install from the public registry put `pw` on the
+  path, and `pw --version`, `pw init` and `pw verify` ran. 0.2.0 before it
+  was checked the same way, except for the installed command itself.
 - The website is live at <https://proofwire.github.io/proofwire/>. It is static files in `site/`, deployed by
   `.github/workflows/pages.yml`; the site's own tests gate the deploy and
   `site/test/` is not published.
