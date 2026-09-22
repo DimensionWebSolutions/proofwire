@@ -116,12 +116,15 @@ jobs:
 
       - name: Bootstrap an org
         run: |
+          # bootstrap prints to stderr (console.error throughout bin.js), not
+          # stdout — 2>&1 is load-bearing, not decoration.
           docker exec \
             -e PROOFWIRE_ORG=CI -e PROOFWIRE_ORG_SLUG=ci \
             -e PROOFWIRE_ADMIN_EMAIL=ci@proofwire.test -e PROOFWIRE_ADMIN_PASSWORD=ci \
-            hub node packages/server/src/bin.js bootstrap > bootstrap.out
+            hub node packages/server/src/bin.js bootstrap > bootstrap.out 2>&1
           echo "AGENT_TOKEN=$(grep '^  agent' bootstrap.out | grep -oE 'pwk_[A-Za-z0-9._-]+')" >> "$GITHUB_ENV"
           echo "AUDIT_TOKEN=$(grep '^  auditor' bootstrap.out | grep -oE 'pwk_[A-Za-z0-9._-]+')" >> "$GITHUB_ENV"
+          grep -q 'pwk_' bootstrap.out || { echo "::error::no token found in bootstrap output"; cat bootstrap.out; exit 1; }
 
       - name: Drive it like a client would
         run: node scripts/docker-smoke.mjs
