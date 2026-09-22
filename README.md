@@ -76,9 +76,15 @@ docker compose up -d
 docker compose exec hub node packages/server/src/bin.js bootstrap
 ```
 
-> **Not yet exercised:** the Dockerfile and compose file are included but have
-> not been built in CI. Everything else in this guide has been run. From source:
-> `npm install && npm run hub -- bootstrap && npm run hub -- serve`.
+> **Built and driven for real:** CI's `docker` job builds this image, boots it,
+> registers a log, signs and pushes receipts, checkpoints, fetches the bundle back
+> and verifies it, confirms a bad token is refused, and checks the container
+> actually runs read-only and non-root (`scripts/docker-smoke.mjs`). It also caught
+> a real bug: a receipt missing an actor field crashed the hub with a raw SQLite
+> error instead of a clean 4xx — fixed in `buildReceipt`/`verifyReceipt`. The two-
+> container witnessing flow below (`docker compose up -d witness`, `pw remote add
+> --name witness`, `pw cosign --remote witness`) was run by hand against both
+> containers, through to `pw check --witnesses 1` on the resulting bundle.
 
 ```bash
 pw remote add --url https://hub.acme.com --token <agent token>

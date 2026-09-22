@@ -1,0 +1,63 @@
+// Drives a hub container the way a real client does: register a log, sign
+// and push receipts with @proof_wire/core directly (no CLI/proxy layer,
+// which is unit-tested elsewhere), fetch the bundle back, and verify it. This
+// is what building the image is *for* — a `docker build` that succeeds proves
+// nothing about any of this on its own, as one earlier receipt shape found
+// out the hard way (a crash this repository's tests now cover directly).
+import { generateIdentity, buildReceipt, signReceipt, entryHash, GENESIS_PREV, verifyBundle } from '@proof_wire/core';
+
+const HUB = process.env.HUB_URL ?? 'http://localhost:8787';
+const token = process.env.AGENT_TOKEN;
+const auditToken = process.env.AUDIT_TOKEN ?? token;
+if (!token) throw new Error('AGENT_TOKEN not set');
+
+async function call(method, path, body, { as = token } = {}) {
+  const res = await fetch(HUB + path, {
+    method,
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${as}` },
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+  const text = await res.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = text; }
+  if (!res.ok) throw new Error(`${method} ${path} -> ${res.status}: ${JSON.stringify(json).slice(0, 300)}`);
+  return json;
+}
+
+const { identity } = generateIdentity();
+const slug = 'ci-smoke-' + Date.now().toString(36);
+
+console.log('register log', slug);
+const log = await call('POST', '/v1/logs', { slug, kid: identity.kid, publicKey: identity.publicKey });
+
+console.log('write 3 receipts');
+let prev = GENESIS_PREV;
+const receipts = [];
+for (let seq = 0; seq < 3; seq++) {
+  const { body } = buildReceipt({
+    log: log.slug, seq, prev,
+    actor: { agent: 'ci-smoke', runtime: 'ci-smoke/1', session: 'sess_ci', principal: 'ci@proofwire.test' },
+    action: { kind: 'ops.query', target: `smoke.${seq}`, params: { n: seq } },
+    decision: { outcome: 'allow', policy: 'p_ci', rules: [] },
+    result: { status: 'ok', payload: { ok: true } },
+  });
+  const receipt = signReceipt(identity, body);
+  prev = entryHash(receipt);
+  receipts.push(receipt);
+}
+const write = await call('POST', `/v1/logs/${log.slug}/receipts`, { receipts });
+if (write.accepted !== 3) throw new Error(`expected 3 accepted, got ${JSON.stringify(write)}`);
+
+console.log('checkpoint');
+await call('POST', `/v1/logs/${log.slug}/checkpoint`, {});
+
+console.log('fetch and verify the bundle');
+const bundle = await call('GET', `/v1/logs/${log.slug}/bundle`, undefined, { as: auditToken });
+const result = verifyBundle(bundle);
+if (!result.ok) throw new Error(`bundle did not verify: ${JSON.stringify(result.issues)}`);
+
+console.log('confirm a bogus token is rejected');
+const bad = await fetch(HUB + '/v1/logs', { headers: { authorization: 'Bearer pwk_bogus.notreal' } });
+if (bad.status !== 401) throw new Error(`expected 401 for a bogus token, got ${bad.status}`);
+
+console.log(`OK: ${bundle.entries.length} entries, ${result.checked} checked, root ${bundle.root.slice(0, 16)}…`);

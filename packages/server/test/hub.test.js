@@ -198,6 +198,32 @@ test('a tampered receipt is rejected even with a valid-looking chain', async () 
   assert.match(res.json.error.message, /signature does not verify/);
 });
 
+test('a validly signed but structurally incomplete receipt is refused, not a 500', async () => {
+  // buildReceipt refuses to construct this — see receipt.test.js — so a body
+  // missing actor.session is assembled by hand, the way a non-compliant
+  // client's receipt would be, and signed honestly over exactly that body.
+  // This used to reach store.js's SQL insert and crash with a raw SQLite
+  // TypeError instead of a clean 4xx.
+  const { body } = buildReceipt({
+    log: 'payments',
+    seq: acme.agent.seq,
+    prev: acme.agent.prev,
+    actor: { agent: 'claude-opus-5', session: 'sess_a', principal: 'ops@acme.test' },
+    action: { kind: 'tool_call', target: 'ops.refund', params: { order: 'ord_x' } },
+    decision: { outcome: 'allow', policy: 'p_test', rules: [] },
+  });
+  delete body.actor.session;
+  const receipt = signReceipt(acme.agent.identity, body);
+
+  const res = await api('POST', '/v1/logs/payments/receipts', {
+    token: acme.key,
+    body: { receipts: [receipt] },
+  });
+  assert.equal(res.status, 422);
+  assert.equal(res.json.error.code, 'receipt_rejected');
+  assert.match(res.json.error.message, /actor\.session is required/);
+});
+
 test('a sequence gap is refused and names where to resume', async () => {
   const stray = new Agent('payments');
   stray.identity = acme.agent.identity;

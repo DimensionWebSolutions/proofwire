@@ -103,6 +103,56 @@ test('a receipt re-signed by a stranger still fails: the kid is not in the keyri
   assert.ok(verifyReceipt(forged, keyring).some((i) => i.kind === 'key'));
 });
 
+test('buildReceipt refuses to assemble a receipt missing a field the hub requires', () => {
+  // A hub binds these straight into non-null SQLite columns. Missing one used
+  // to surface as a server crash on whichever request found it, days later
+  // and nowhere near the receipt that caused it — not here, where the mistake
+  // is one line away.
+  const base = {
+    log: 'lg_test',
+    seq: 0,
+    prev: GENESIS_PREV,
+    actor: { agent: 'a', runtime: 'r', session: 's', principal: 'p' },
+    action: { kind: 'tool_call', target: 't', params: {} },
+    decision: { outcome: 'allow', policy: 'p0', rules: [] },
+  };
+  const cases = [
+    [{ ...base, actor: { ...base.actor, principal: '' } }, /actor\.principal/],
+    [{ ...base, actor: { ...base.actor, agent: undefined } }, /actor\.agent/],
+    [{ ...base, actor: { ...base.actor, session: undefined } }, /actor\.session/],
+    [{ ...base, action: { ...base.action, kind: undefined } }, /action\.kind/],
+    [{ ...base, action: { ...base.action, target: '' } }, /action\.target/],
+    [{ ...base, decision: { ...base.decision, outcome: undefined } }, /decision\.outcome/],
+  ];
+  for (const [args, pattern] of cases) {
+    assert.throws(() => buildReceipt(args), pattern);
+  }
+});
+
+test('verifyReceipt catches the same gaps in a hand-built receipt, not just ones from buildReceipt', () => {
+  // A receipt need not have come from this library's buildReceipt to reach
+  // the hub — this is the check that stands between a malformed-but-validly-
+  // signed receipt and a server crash, regardless of what produced it.
+  const { body } = buildReceipt({
+    log: 'lg_test',
+    seq: 0,
+    prev: GENESIS_PREV,
+    actor: { agent: 'a', runtime: 'r', session: 's', principal: 'p' },
+    action: { kind: 'tool_call', target: 't', params: {} },
+    decision: { outcome: 'allow', policy: 'p0', rules: [] },
+  });
+  delete body.actor.session;
+  const r = signReceipt(identity, body);
+  const issues = verifyReceipt(r, keyring);
+  assert.ok(
+    issues.some((i) => i.kind === 'format' && /actor\.session/.test(i.message)),
+    `expected a format issue naming actor.session, got ${JSON.stringify(issues)}`,
+  );
+  // The signature itself is still sound — this is a shape problem, not a
+  // forgery — and the tamper test above already covers forgeries.
+  assert.ok(!issues.some((i) => i.kind === 'signature'));
+});
+
 test('an intact chain verifies end to end', () => {
   const res = verifyChain(chainOf(10), keyring);
   assert.ok(res.ok, JSON.stringify(res.issues));

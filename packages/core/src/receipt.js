@@ -137,6 +137,23 @@ export function openSeal(sealed, saltB64u, value) {
  */
 
 /**
+ * `buildReceipt` insists on these because a hub does: they are bound straight
+ * into non-null SQLite columns, and a receipt lacking one is only discovered
+ * when the hub crashes on it — a raw `TypeError` from the driver, on whichever
+ * request happens to be routed to that connection first, with no indication
+ * which field or which receipt. Catching it here, at construction, turns that
+ * into a clear error before the receipt is even signed.
+ *
+ * @param {unknown} value
+ * @param {string} field
+ */
+function requireField(value, field) {
+  if (typeof value !== 'string' || value === '') {
+    throw new Error(`buildReceipt: ${field} is required and must be a non-empty string`);
+  }
+}
+
+/**
  * Assemble an unsigned receipt body.
  *
  * @param {object} args
@@ -154,6 +171,13 @@ export function openSeal(sealed, saltB64u, value) {
  *   The salts are the caller's to store separately — see `seal`.
  */
 export function buildReceipt(args) {
+  requireField(args.actor?.principal, 'actor.principal');
+  requireField(args.actor?.agent, 'actor.agent');
+  requireField(args.actor?.session, 'actor.session');
+  requireField(args.action?.kind, 'action.kind');
+  requireField(args.action?.target, 'action.target');
+  requireField(args.decision?.outcome, 'decision.outcome');
+
   const params = seal(args.action.params);
   const payload = args.result ? seal(args.result.payload) : null;
 
@@ -256,6 +280,26 @@ export function verifyReceipt(receipt, keyring) {
   }
   if (receipt.v !== RECEIPT_VERSION) {
     issues.push({ seq, kind: 'format', message: `unsupported receipt version ${receipt.v}` });
+  }
+  // A hub binds these straight into non-null database columns. Catching a
+  // missing one here, before the signature is even checked, is what stands
+  // between a malformed-but-validly-signed receipt and a server crash — a
+  // receipt need not have come from `buildReceipt` to reach this function.
+  for (const [path, value] of [
+    ['ts', receipt.ts],
+    ['actor.principal', receipt.actor?.principal],
+    ['actor.agent', receipt.actor?.agent],
+    ['actor.session', receipt.actor?.session],
+    ['action.kind', receipt.action?.kind],
+    ['action.target', receipt.action?.target],
+    ['decision.outcome', receipt.decision?.outcome],
+  ]) {
+    if (typeof value !== 'string' || value === '') {
+      issues.push({ seq, kind: 'format', message: `${path} is required and must be a non-empty string` });
+    }
+  }
+  if (!['atomic', 'intent', 'outcome'].includes(receipt.phase)) {
+    issues.push({ seq, kind: 'format', message: `phase must be one of atomic, intent, outcome; got ${JSON.stringify(receipt.phase)}` });
   }
   const attest = receipt.attest;
   if (!attest || attest.alg !== 'ed25519' || typeof attest.sig !== 'string') {
