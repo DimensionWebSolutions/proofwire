@@ -12,6 +12,7 @@ import fs from 'node:fs';
  *     --witness-key kid=publicKey[,kid=publicKey…]
  *     --witness-keys witnesses.json      { "kid": "publicKey", … }
  *                                        or [ { "kid": …, "publicKey": … }, … ]
+ *                                        (entries with `revokedAt` are skipped)
  *
  * @param {Record<string, any>} args
  * @returns {Record<string, string>|undefined}  undefined when none were given.
@@ -34,7 +35,20 @@ export function witnessKeysFrom(args) {
   const file = args['witness-keys'];
   if (typeof file === 'string') {
     const raw = JSON.parse(fs.readFileSync(file, 'utf8'));
-    const entries = Array.isArray(raw) ? raw.map((w) => [w?.kid, w?.publicKey]) : Object.entries(raw);
+    // The list form is also the format of the repository's published witness
+    // record (witnesses/keys.json), which marks a compromised key `revokedAt`
+    // rather than deleting it. A revoked key is never pinned: whoever holds it
+    // could "witness" anything. A merely retired one still is — it stopped
+    // signing, but what it signed before stays good.
+    const revoked = Array.isArray(raw)
+      ? raw.filter((w) => typeof w?.revokedAt === 'string' && w.revokedAt).map((w) => w.kid)
+      : [];
+    if (revoked.length) {
+      process.stderr.write(`  not pinning ${revoked.length} revoked witness key(s) from ${file}: ${revoked.join(', ')}\n`);
+    }
+    const entries = Array.isArray(raw)
+      ? raw.filter((w) => !revoked.includes(w?.kid)).map((w) => [w?.kid, w?.publicKey])
+      : Object.entries(raw);
     for (const [kid, publicKey] of entries) {
       if (typeof kid !== 'string' || typeof publicKey !== 'string' || !kid || !publicKey) {
         throw new Error(`${file}: each witness needs a kid and a publicKey`);

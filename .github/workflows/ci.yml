@@ -21,6 +21,11 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history: scripts/witness-record.test.mjs replays every commit
+          # of witnesses/keys.json to prove it has only ever been appended to,
+          # and a shallow clone has one commit to replay.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node }}

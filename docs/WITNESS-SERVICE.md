@@ -102,6 +102,16 @@ of reinventing it is consistent with `BUSINESS.md`'s own read on Sigstore
 as "right primitives, wrong domain" — the domain matches here). A key
 rotation needs a public, dated record, not a silent swap.
 
+**First half done:** [`witnesses/keys.json`](../witnesses/keys.json) is the
+record — empty, because no Proofwire witness runs yet, and a placeholder key
+would invite auditors to pin something nobody operates. It is append-only,
+enforced rather than promised: `scripts/witness-record.test.mjs` replays every
+commit of the file on every CI run, and an entry may only ever gain a
+`retiredAt` (stopped signing; still pinned) or a `revokedAt` (never trust; `pw
+check --witness-keys` skips it). Each entry's `kid` must derive from its key.
+`pw check --witness-keys witnesses/keys.json` reads it directly. Still to do:
+showing it on the site, and Rekor.
+
 ### 4. Billing and metering
 
 `BUSINESS.md` prices per receipt, not per seat. The hub already meters
@@ -240,9 +250,8 @@ the backup/restore question in item 5 actually resolved rather than noted.
 a documentation checklist behind it; the software side is already what
 Phase 0 built.
 
-With Phase 0 and the log-key binding done, what's left before Phase 1 isn't
-code: it's a domain and somewhere to run the node — plus a 0.3.0 release, so
-the `pw` on npm speaks the binding. The next engineering candidate that needs
-none of those decisions is publishing the witness key into this repository as
-a dated, append-only record (item 3's first half), ready for the day there's a
-real node's key to put in it.
+With Phase 0, the log-key binding, 0.3.0 on npm and the key record in place,
+what's left before Phase 1 isn't code: it's a domain and somewhere to run the
+node. When there is one, its key goes into `witnesses/keys.json` with
+`node scripts/witness-record.mjs add` — taken from the host, not the node's
+API — in a commit of its own.

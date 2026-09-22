@@ -3,6 +3,20 @@
 All five packages — `proofwire` and `@proof_wire/{core,proxy,dashboard,server}` —
 release together at the same version.
 
+## Unreleased
+
+### Changed
+
+- **`pw check --witness-keys` skips list entries that carry `revokedAt`**, and
+  says which. A revoked witness key could "witness" anything; a retired one
+  (`retiredAt`) is still pinned, since what it signed before stays good.
+
+### Added
+
+- **`witnesses/keys.json`**, the published record of Proofwire-operated
+  witness keys — empty until there is a real node. Append-only, enforced by
+  replaying its git history in CI; `pw check --witness-keys` reads it directly.
+
 ## 0.3.0 — 2026-09-22
 
 ### Breaking

@@ -371,6 +371,12 @@ checkpoints. Only signatures from keys you pinned are counted, and asking for
 `--witnesses` without pinning any is refused rather than answered by counting
 whatever the bundle contains.
 
+`witnesses.json` can be a `{ "kid": "publicKey" }` map or a list of
+`{ kid, publicKey }` entries. Proofwire's own witness keys, once there are any,
+are published in that list form at
+[`witnesses/keys.json`](../witnesses/keys.json) — append-only, with every
+change a commit — and a list entry carrying `revokedAt` is never pinned.
+
 ---
 
 ## Operating it
