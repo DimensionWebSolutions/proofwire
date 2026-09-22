@@ -400,3 +400,59 @@ test('keys and signatures must be canonical base64url', () => {
   }
   assert.ok(found > 0, 'the search never produced a signature that exercises the alphabet check');
 });
+
+test('base64url rejects a non-canonical final quantum, not just a wrong alphabet or length', () => {
+  // The alphabet and length checks above do not catch this: 'QA' and 'QB'
+  // both pass both, and Buffer.from(_, 'base64url') decodes them to the same
+  // byte, 0x40 — only 'QA' is the encoding a canonical encoder would produce
+  // for it. Left unrejected, one signature or key has more than one valid
+  // textual encoding, and entryHash (which hashes the receipt's literal
+  // bytes) would treat two encodings of the same signature as two different
+  // receipts.
+  //
+  // A 64-byte signature's base64url form always ends in a 2-symbol tail (4
+  // unused bits — 64 mod 3 = 1 leftover byte); a 32-byte key's always ends in
+  // a 3-symbol tail (2 unused bits — 32 mod 3 = 2 leftover bytes). That is
+  // structural, not a property of any one signature or key, so real,
+  // otherwise-valid material exercises both tail shapes without needing to
+  // synthesize either. `Buffer.from(_, 'base64url')` is used below only as a
+  // reference decoder, to work out which of the 64 possible final characters
+  // would — before this fix, and still in Node's own unchecked decoder —
+  // produce the exact same bytes as the real one; it is not the thing being
+  // tested.
+  const v = ED25519_VECTORS[0];
+  const key = Buffer.from(v.public, 'hex').toString('base64url');
+  const sig = Buffer.from(v.signature, 'hex').toString('base64url');
+  const msg = Buffer.from(v.message, 'hex');
+  const ALPHA = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
+
+  /** Every re-spelling of `s`'s last character that decodes to the same bytes `s` does, `s` itself included. */
+  function sameByteRespellings(s) {
+    const original = Buffer.from(s, 'base64url');
+    const out = [];
+    for (const c of ALPHA) {
+      const candidate = s.slice(0, -1) + c;
+      if (Buffer.from(candidate, 'base64url').equals(original)) out.push(candidate);
+    }
+    return out;
+  }
+
+  assert.ok(verify(key, msg, sig), 'the canonical encoding must still verify, as a sanity check');
+
+  // A 2-symbol tail's last symbol has 4 unused (padding) bits, so 2**4 = 16
+  // spellings share one byte value; a 3-symbol tail's has 2, so 2**2 = 4 do.
+  const sigRespellings = sameByteRespellings(sig);
+  assert.equal(sigRespellings.length, 16, "a signature's 2-symbol tail should have exactly 16 same-byte respellings");
+  for (const respelled of sigRespellings) {
+    assert.equal(verify(key, msg, respelled), respelled === sig, `verify(${JSON.stringify(respelled)}) should be ${respelled === sig}`);
+  }
+
+  const keyRespellings = sameByteRespellings(key);
+  assert.equal(keyRespellings.length, 4, "a key's 3-symbol tail should have exactly 4 same-byte respellings");
+  for (const respelled of keyRespellings) {
+    assert.equal(verify(respelled, msg, sig), respelled === key, `verify(${JSON.stringify(respelled)}, …) should be ${respelled === key}`);
+    if (respelled !== key) {
+      assert.throws(() => identityFromPublicKey(respelled), undefined, `identityFromPublicKey accepted a non-canonical respelling of a real key`);
+    }
+  }
+});

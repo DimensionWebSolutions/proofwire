@@ -4,6 +4,10 @@
 fast, and pointed — scope stated, ground truth identified, and the places I am
 least sure about named rather than left to be found.
 
+*Line counts, test counts and the findings list below are current as of
+2026-09-22. If you're reading this later, `wc -l` the files in the table and
+`npm test`'s summary line will tell you if it has drifted.*
+
 It is written in the knowledge that **I wrote both the implementation and its
 tests**, which is exactly why an outside review is needed: the tests check what
 their author thought to check.
@@ -12,18 +16,18 @@ their author thought to check.
 
 ## What to review
 
-**~1,500 lines.** Everything else is plumbing around it.
+**~1,600 lines.** Everything else is plumbing around it.
 
 | File | Lines | Why it matters |
 | --- | ---: | --- |
-| `packages/core/src/merkle.js` | ~330 | RFC 6962 tree, inclusion and consistency proofs. **The highest-value target.** |
+| `packages/core/src/merkle.js` | ~375 | RFC 6962 tree, inclusion and consistency proofs. **The highest-value target.** |
 | `packages/core/src/canonical.js` | ~110 | RFC 8785. If two parties disagree on bytes, every signature is arguable. |
-| `packages/core/src/receipt.js` | ~330 | What is signed, what is chained, the salted commitments |
+| `packages/core/src/receipt.js` | ~375 | What is signed, what is chained, the salted commitments, and the shape checks that keep a malformed-but-validly-signed receipt from reaching storage |
 | `packages/core/src/hash.js` | ~76 | Domain separation |
-| `packages/core/src/keys.js` | ~157 | Ed25519, and a hand-assembled DER SPKI header |
-| `packages/core/src/checkpoint.js` | ~185 | Signed tree heads, witness co-signatures |
-| `packages/server/src/store.js` → `ingest()` | ~120 | The four admission checks |
-| `packages/server/src/app.js` → `/v1/witness/cosign` | ~100 | Split-view refusal, and its transaction boundary |
+| `packages/core/src/keys.js` | ~180 | Ed25519, a hand-assembled DER SPKI header, and strict base64url decoding |
+| `packages/core/src/checkpoint.js` | ~225 | Signed tree heads, witness co-signatures, witness pinning |
+| `packages/server/src/store.js` → `ingest()` | ~155 | The admission checks |
+| `packages/server/src/app.js` → `/v1/witness/cosign` | ~105 | Split-view refusal, and its transaction boundary |
 
 Out of scope unless you want to: the console, the CLI, the policy engine
 (security-relevant but not cryptographic), backups.
@@ -32,10 +36,24 @@ Out of scope unless you want to: the console, the CLI, the policy engine
 
 ```bash
 npm install          # zero external dependencies; installs 5 workspace links
-npm test             # 207 tests
+npm test             # 289 tests
 node --no-warnings=ExperimentalWarning packages/server/test/load.js
 npm run demo         # attacks a real log four ways
 ```
+
+There is also a from-scratch second implementation of the verifier
+(`site/verify.js`, for the browser) with no shared code, checked against the
+first over honest, tampered and 650 randomly mutated bundles:
+
+```bash
+node --no-warnings=ExperimentalWarning --test 'site/test/*.test.js'   # 65 tests
+```
+
+Disagreement between the two on any bundle is itself a failing test. This is
+the harness that found the gaps in item 7 below, and it is the cheapest way to
+keep finding more of that class — a reviewer who wants to try a mutation the
+suite doesn't cover can add it to `ATTACKS` in `site/test/verify.test.js` and
+run it against both verifiers in one command.
 
 No build step. Node ≥ 22.13 (where `node:sqlite` stopped needing a flag); the core needs
 only ≥ 20.11 and has no dependencies at all.
@@ -143,13 +161,24 @@ redaction — I treat that as a known, documented leak, not a defence.
 
 Accepts hex, base64 and base64url from an external signer. **Can a crafted
 string be coerced into 64 bytes that are not the signature the KMS produced?**
+(This does not share item 7's base64 malleability — it always re-encodes with
+`Buffer#toString('base64url')`, Node's own canonical encoder, so no matter how
+the KMS spelled its input, the stored output is always the one canonical
+spelling. The question here is narrower: whether the hex-vs-base64 sniffing
+itself can be fooled.)
 
 ### 7. What a bundle is allowed to say about itself
 
-Two gaps in bundle verification were found by me *after* the first version of
-this brief, both while writing a second verifier for the website
-(`site/verify.js`) and running it against the first. Both are fixed; please
-check that the fixes cover the class and not just the instances.
+Three gaps in bundle verification were found by me *after* the first version
+of this brief, all while writing a second verifier for the website
+(`site/verify.js`) — the first two by the two implementations disagreeing on
+a concrete bundle, never by reasoning about the format in the abstract; the
+third by a different method, described in its own entry below, because the
+two implementations shared the mistake and would have agreed. All three are
+fixed; please check that the fixes cover the class and not just the
+instances — and, for the third, that "disagreement between two from-scratch
+implementations" is not being over-trusted as a method now that it has a
+demonstrated blind spot.
 
 - **Completeness was taken on the sender's word.** A bundle with its last
   entries removed and `partial` left false verified clean, as did one whose
@@ -163,6 +192,50 @@ check that the fixes cover the class and not just the instances.
   `trustedWitnesses` (kid → public key, from the witness operators), counts only
   those, checks them against the pinned key rather than the bundle's, and refuses
   the request outright if none are supplied.
+- **Base64url decoding was lenient in both implementations, identically, and
+  the leniency was many-to-one — which is why differential testing did not
+  catch it.** Gaps 1 and 2 above surfaced because the two verifiers
+  *disagreed*. This one is different in kind: `Buffer.from(s, 'base64url')`
+  and the browser's `atob` are *equally* forgiving about a base64 quantum's
+  unused padding bits, so both sides would have agreed — wrongly — on the
+  same wrong answer, and the differential harness has no way to notice two
+  implementations being wrong the same way. It was found by checking both
+  against a third thing: whether re-encoding the decoded bytes reproduces the
+  original string. Concretely, a base64 quantum whose final symbol carries
+  bits no byte value uses (2 symbols encoding 1 leftover byte have 4 such
+  bits; 3 symbols encoding 2 leftover bytes have 2) is supposed to have those
+  bits at zero, and nothing was checking that:
+  `Buffer.from('QB', 'base64url')` and `atob('QB==')` both decode `'QB'` to
+  the same byte as the canonical `'QA'`, and 15 other respellings do too — a
+  64-byte Ed25519 signature's trailing 2-symbol quantum has exactly 16 ways
+  to spell the same bytes, a 32-byte key's trailing 3-symbol quantum has 4.
+  **Fixed** in both `decodeBase64url` (`packages/core/src/keys.js`) and
+  `fromB64u` (`site/verify.js`) by decoding, re-encoding, and requiring the
+  result to equal the input — exhaustive over all 64 possible final symbols
+  for both tail shapes, cross-checked between the two implementations over
+  20,000 random strings, zero disagreements. `vectors.test.js` covers it
+  against real signed material, not synthetic strings.
+
+  **What I want checked, because I could not rule it out by reasoning alone:**
+  before the fix, could an in-scope adversary (the log operator, holding the
+  signing key) use this to make one Merkle leaf's canonical bytes ambiguous
+  in a way that helps forge a **root collision** — the same root from two
+  different histories — without an actual SHA-256 collision? My own answer is
+  no: `entryHash` is a domain-separated hash of the receipt's literal bytes,
+  re-spelling `attest.sig` changes those bytes and therefore the leaf, and a
+  Merkle root is sensitive to every leaf, so two different spellings still
+  produce two different, honestly-computed roots — matching a previously
+  witnessed root via encoding tricks alone would still require breaking
+  SHA-256, which base64 says nothing about. I would like that argument
+  checked rather than trusted from its author, since it's exactly the kind of
+  reasoning that's easy to get subtly wrong. Separately: this is a transport-
+  adjacent issue too (a party who can alter bytes in flight, without holding
+  the key, could re-spell `attest.sig` and change what a receiving hub
+  computes as that entry's hash — a real availability/integrity hazard for
+  whoever's `prev` pointer no longer matches). `docs/THREAT-MODEL.md` A7
+  already puts network attackers out of scope and pushes that to TLS; I have
+  not re-examined whether that's still the right call in light of this
+  specific mechanism, and it's a fair question for review too.
 
 **The open question behind the second one:** a checkpoint signature's `role`
 (`log` or `witness`) is a label the signature does not cover. Pinning makes that
@@ -171,9 +244,9 @@ harmless for witnesses, and a pinned key is refused as a log signature, but the
 digest (a format v2), or is pinning the right and sufficient answer?
 
 Also worth knowing: `site/test/verify.test.js` runs the two independent
-verifiers over honest, tampered and randomly mutated bundles and requires the
-same verdict every time. That is how both gaps surfaced, and it is the cheapest
-way to keep finding them.
+verifiers over honest, tampered and 650 randomly mutated bundles and requires
+the same verdict every time. That is how all three gaps surfaced, and it is
+the cheapest way to keep finding more of them — see "Running it" above.
 
 ---
 

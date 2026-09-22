@@ -359,7 +359,7 @@ not ready for production.
 ## Status
 
 `0.2.0` — cryptography, policy engine, proxy, CLI, and the multi-tenant hub are
-complete and covered by **207 tests**: the published RFC 6962 Certificate
+complete and covered by **289 tests**: the published RFC 6962 Certificate
 Transparency reference tree and RFC 8032 Ed25519 vectors, exhaustive Merkle
 proof verification for every tree size up to 128 and every `(m, n)` consistency
 pair up to 48, and end-to-end tests that run a real agent through a real proxy

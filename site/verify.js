@@ -57,13 +57,32 @@ function unhex(s) {
   return Uint8Array.from(s.match(/../g) ?? [], (h) => parseInt(h, 16));
 }
 
-/** @param {string} s @returns {Uint8Array} */
+/**
+ * @param {string} s @returns {Uint8Array}
+ *
+ * `atob` is exactly as lenient as Node's `Buffer.from(s, 'base64url')` about a
+ * final quantum's unused low bits — `'QA'` and `'QB'` both decode to `0x40` —
+ * so re-encoding and comparing is required here too, for the same reason it
+ * is required in `packages/core/src/keys.js`: two implementations that are
+ * each internally lenient in the same way will still *agree*, which is
+ * exactly what makes this class of gap invisible to differential testing
+ * between them.
+ */
 function fromB64u(s) {
   if (typeof s !== 'string' || !/^[A-Za-z0-9_-]*$/.test(s) || s.length % 4 === 1) {
     throw new TypeError('not base64url');
   }
   const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/') + '='.repeat((4 - (s.length % 4)) % 4));
-  return Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+  if (toB64u(bytes) !== s) throw new TypeError('not canonical base64url');
+  return bytes;
+}
+
+/** @param {Uint8Array} bytes @returns {string} */
+function toB64u(bytes) {
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 }
 
 /** @param {Uint8Array} a @param {Uint8Array} b */

@@ -34,6 +34,19 @@ import { sha256 } from './hash.js';
  * quietly accepts malformed encodings is one that can be argued into agreeing
  * with something it should have rejected.
  *
+ * The alphabet and length checks below catch that, but not a subtler case: a
+ * base64url quantum whose last symbol carries bits no byte uses. `'QA'` and
+ * `'QB'` both decode to `0x40` — only `'QA'` is the encoding a canonical
+ * encoder would produce, but `Buffer.from` accepts both and neither the
+ * alphabet check nor the length check rejects `'QB'`. Left unfixed, the same
+ * signature or key has more than one valid textual encoding, and `entryHash`
+ * — which hashes the receipt's literal bytes, not its decoded meaning — would
+ * treat two encodings of one signature as two different receipts. Re-encoding
+ * canonically and comparing is the direct way to ask "is this the one
+ * encoding a real encoder would have written": it needs no bit arithmetic on
+ * the quantum, and it is exactly what a verifier that never re-encodes
+ * anything else would otherwise be trusting silently.
+ *
  * @param {string} s
  * @returns {Buffer}
  */
@@ -41,7 +54,11 @@ function decodeBase64url(s) {
   if (typeof s !== 'string' || !/^[A-Za-z0-9_-]*$/.test(s) || s.length % 4 === 1) {
     throw new TypeError('not base64url');
   }
-  return Buffer.from(s, 'base64url');
+  const buf = Buffer.from(s, 'base64url');
+  if (buf.toString('base64url') !== s) {
+    throw new TypeError('not canonical base64url');
+  }
+  return buf;
 }
 
 /**
