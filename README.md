@@ -22,12 +22,6 @@ npm install -g proofwire
 pw init
 ```
 
-> **Not on npm yet.** Until the first release, `npm install -g proofwire` will
-> 404. From a clone, run `npm install`, then use `npm run pw -- <command>`
-> wherever this README says `pw <command>` (for example `npm run pw -- init`).
-> This note goes away with the first publish; see
-> [`docs/PUBLISHING.md`](docs/PUBLISHING.md).
-
 Then wrap any MCP server:
 
 ```jsonc

@@ -9,6 +9,9 @@ Two paths. The second is the one to use once it is set up.
 - The repository is live and public in the `proofwire` organisation, with
   GitHub's private vulnerability reporting on, so the link in
   [`SECURITY.md`](../SECURITY.md) works.
+- Version 0.2.0 of all five packages is on npm: `proofwire` and the four
+  `@proof_wire/*` libraries. A clean `npm install proofwire@0.2.0` from the
+  public registry was run and the installed CLI ran (`pw init`).
 - The website is live at <https://proofwire.github.io/proofwire/>. It is static files in `site/`, deployed by
   `.github/workflows/pages.yml`; the site's own tests gate the deploy and
   `site/test/` is not published.
@@ -116,10 +119,7 @@ Then the things that are not automatable and are worth doing deliberately:
       and writes the version into `site/release.json`, which reveals the install
       line on the page. It does so only if `npm view proofwire repository.url`
       points at this repository: the CLI's name is unscoped, so without that
-      check anyone who registered it first would be advertised here. Then delete
-      the *Not on npm yet* note from the root `README.md` (not from
-      `packages/cli/README.md`, which ships in the tarball and is correct once
-      published).
+      check anyone who registered it first would be advertised here. Done for 0.2.0.
 - [ ] Enable **2FA on the npm account**. A compromised publish account on a
       package that claims to make things tamper-evident is the worst available
       outcome.
