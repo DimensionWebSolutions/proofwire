@@ -320,6 +320,7 @@ Prove
   pw prove <seq>                 inclusion proof for one receipt
   pw export [file]               evidence bundle for a third party
   pw check <file>                verify a bundle with nothing but itself
+  pw report                      evidence pack for auditors (AI Act, SOC 2); see docs/EVIDENCE.md
 
 Hub
   pw remote add --url <hub> --token <key>   connect this machine (https, or

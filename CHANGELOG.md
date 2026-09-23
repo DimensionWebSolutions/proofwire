@@ -56,6 +56,19 @@ release together at the same version.
 
 ### Added
 
+- **`pw report`: an evidence pack for auditors** ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)).
+  One directory holding `report.html` (self-contained, no scripts),
+  `evidence.bundle.json` (verifiable with `pw check`), `summary.json` and
+  `SHA256SUMS`. It covers integrity (with pinned witnesses via `--witness-key(s)`),
+  activity, every escalation with who approved or declined it, refusals, monitor
+  mode, and the policy versions in force. It maps the evidence to the EU AI Act
+  (Arts. 12, 14, 19/26(6)) and SOC 2 (CC4.1, CC6.1, CC7.2, CC7.3, CC8.1),
+  worded as what the evidence supports, never as compliance. `--since`,
+  `--until`, `--framework`, `--out`.
+- **Receipts record who declined an escalation**, as `decision.declined = { by,
+  at, note }`, inside the signature, as approvals already did. A fallback (no
+  approver, a timeout) is recorded as the `policy:*` fallback it was, never as
+  a person. `pw policy test` reads these as escalations.
 - **Slack approvals** ([`docs/SLACK.md`](docs/SLACK.md)). An escalation is
   posted to the organisation's Slack channel with Approve and Deny buttons; a
   click decides it as the console would, and the receipt records who, as

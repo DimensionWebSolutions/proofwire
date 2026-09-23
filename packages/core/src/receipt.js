@@ -114,7 +114,9 @@ export function openSeal(sealed, saltB64u, value) {
  * @property {string} policy     Hash of the policy document in force.
  * @property {string[]} rules    Rule ids that fired, in evaluation order.
  * @property {string} [reason]   Human-readable justification.
- * @property {{ by: string, at: string, note?: string }} [approval]
+ * @property {{ by: string, at: string, note?: string }} [approval]  An escalation a person approved.
+ * @property {{ by: string, at: string, note?: string }} [declined]  An escalation that was not
+ *   approved: by a person, or by a fallback such as `policy:timeout` or `policy:no-approver`.
  * @property {false} [enforced]  Present, and false, when the policy was only
  *   observed (monitor mode): the call ran whatever the policy said.
  * @property {'deny'|'escalate'} [wouldBe]  In monitor mode, what enforcement

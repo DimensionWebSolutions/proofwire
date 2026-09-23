@@ -227,6 +227,23 @@ test('escalation with no approver configured denies, and says why', async () => 
   assert.equal(received[0].result.isError, true);
   assert.match(received[0].result.content[0].text, /no approver is configured/);
   assert.equal(log.entries[0].decision.outcome, 'deny');
+  // A fallback is recorded as one, not as a person.
+  assert.match(log.entries[0].decision.declined.by, /^policy:/);
+  assert.equal(log.entries[0].decision.approval, undefined);
+});
+
+test('an escalation a person declines records who declined it, inside the signature', async () => {
+  const { log } = await run({
+    policy: { rules: [{ id: 'escalate.mail', when: { target: 'ops.send_email' }, then: 'escalate' }] },
+    approver: async () => ({ approved: false, by: 'slack:U024BE7LH (dana)', note: 'wrong customer' }),
+    send: [call(1, 'send_email', { to: 'customer@example.test', subject: 'Hi' })],
+  });
+  const d = log.entries[0].decision;
+  assert.equal(d.outcome, 'deny');
+  assert.equal(d.declined.by, 'slack:U024BE7LH (dana)');
+  assert.equal(d.declined.note, 'wrong customer');
+  assert.ok(Date.parse(d.declined.at));
+  assert.ok(log.audit().ok);
 });
 
 test('an approved escalation runs and records who approved it', async () => {

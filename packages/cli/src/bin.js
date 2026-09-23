@@ -5,6 +5,7 @@ import path from 'node:path';
 import { ProofLog, verifyBundle, Policy, verifyInclusion, unhex, generateIdentity } from '@proof_wire/core';
 import { McpProxy, auditPolicyMetrics } from '@proof_wire/proxy';
 import { cmdPolicyTest } from './policy-test.js';
+import { cmdReport } from './report.js';
 import { RemoteSink, hubApprover, fetchPolicy } from '@proof_wire/proxy/remote';
 import { approverFrom } from '@proof_wire/proxy/approve';
 import { c, out, err, ok, bad, warn, info, heading, kv, table, outcomeBadge, parseArgs } from './ui.js';
@@ -747,6 +748,7 @@ function cmdHelp() {
   out(`    ${c.cyan('pw prove <seq>')}                 inclusion proof for one receipt`);
   out(`    ${c.cyan('pw export [file]')}               evidence bundle for a third party  ${c.grey('[--since --session]')}`);
   out(`    ${c.cyan('pw check <file>')}                verify a bundle with nothing but itself`);
+  out(`    ${c.cyan('pw report')}                      evidence pack for auditors: AI Act, SOC 2  ${c.grey('[--since --until --out --framework]')}`);
   out('');
   out(`  ${c.bold('Hub')}   ${c.grey('connect to a Proofwire hub for your team')}`);
   out(`    ${c.cyan('pw remote add --url <hub> --token <key>')}   connect this machine ${c.grey('[--insecure for plain http]')}`);
@@ -776,6 +778,7 @@ const COMMANDS = {
   policy: (/** @type {any} */ args) => (args._[1] === 'test' ? cmdPolicyTest(args, loadConfig(args)) : cmdPolicy(args)),
   cosign: cmdCosign,
   slack: cmdSlack,
+  report: (/** @type {any} */ args) => cmdReport(args, loadConfig(args), VERSION),
   proxy: cmdProxy,
   verify: cmdVerify,
   audit: cmdVerify,

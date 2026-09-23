@@ -220,3 +220,4 @@ Listed because a plan without this section is marketing.
    every verdict the new policy would change.
 5. **Compliance export** — AI Act Article 12 / SOC 2 evidence packs, generated
    from receipts. This is what turns a developer tool into a line item.
+   *Built:* `pw report` writes a verifiable evidence pack; see `docs/EVIDENCE.md`.

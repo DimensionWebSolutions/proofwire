@@ -35,7 +35,7 @@ import { c, out, bad, warn, heading, kv, table } from './ui.js';
  */
 export function recordedVerdict(r) {
   if (r.decision.wouldBe) return r.decision.wouldBe;
-  if (r.decision.approval) return 'escalate';
+  if (r.decision.approval || r.decision.declined) return 'escalate';
   return r.decision.outcome;
 }
 

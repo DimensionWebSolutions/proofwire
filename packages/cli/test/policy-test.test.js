@@ -63,6 +63,9 @@ test('a monitored call is compared on what the policy would have done, not on th
 test('an approved escalation is recorded as an escalation, not as the human\'s yes', () => {
   const approved = rec('crm.email', { decision: { outcome: 'allow', rules: ['mail'], approval: { by: 'dana', at: 'x' } } });
   assert.equal(recordedVerdict(approved), 'escalate');
+  // And so is one a person, or a timeout, declined: the policy said escalate.
+  const declined = rec('crm.email', { decision: { outcome: 'deny', rules: ['mail'], declined: { by: 'policy:timeout', at: 'x' } } });
+  assert.equal(recordedVerdict(declined), 'escalate');
 });
 
 test('budgets are replayed against what the new policy would have let through', () => {

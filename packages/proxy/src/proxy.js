@@ -379,6 +379,10 @@ export class McpProxy extends EventEmitter {
           ...decision,
           outcome: 'deny',
           reason: verdict.note ? `${decision.reason} — ${verdict.note}` : decision.reason,
+          // Who said no is evidence of oversight as much as who said yes. A
+          // fallback (no approver, a timeout) is recorded as the policy
+          // fallback it was, e.g. `policy:timeout`, never as a person.
+          declined: { by: verdict.by, at: new Date().toISOString(), ...(verdict.note ? { note: verdict.note } : {}) },
         };
       }
     }
