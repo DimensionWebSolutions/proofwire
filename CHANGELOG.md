@@ -5,6 +5,12 @@ release together at the same version.
 
 ## Unreleased
 
+### Fixed
+
+- **`pw proxy` no longer triggers Node's DEP0190 warning on Windows** when it
+  wraps a bare command such as `npx` or `node`. The shell now gets one
+  already-quoted command line with no separate args. Quoting is unchanged.
+
 ### Changed
 
 - **`pw check --witness-keys` skips list entries that carry `revokedAt`**, and

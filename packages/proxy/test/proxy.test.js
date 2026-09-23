@@ -497,11 +497,52 @@ test('launching handles Windows shims and spaced interpreter paths alike', async
     // directly, so it goes through the shell — with everything quoted.
     const shim = launchSpec('npx', ['-y', '@acme/mcp server']);
     assert.equal(shim.shell, true);
-    assert.deepEqual(shim.args, ['-y', '"@acme/mcp server"']);
+    assert.equal(shim.command, 'npx -y "@acme/mcp server"');
+    assert.deepEqual(shim.args, []);
   } else {
     assert.equal(spec.shell, false);
     assert.equal(launchSpec('npx', ['-y', 'x']).shell, false);
   }
+});
+
+test('a Windows shim is launched as one quoted command line, never shell plus argv', async () => {
+  const { launchSpec } = await import('../src/proxy.js');
+
+  // Separate args with `shell: true` is what Node 24 flags as DEP0190: Node
+  // concatenates them unescaped. The spec must carry the finished line.
+  const spec = launchSpec('npx', ['-y', '@acme/mcp server', 'a"b', '100%', 'x&y'], 'win32');
+  assert.equal(spec.shell, true);
+  assert.deepEqual(spec.args, []);
+  assert.equal(spec.command, String.raw`npx -y "@acme/mcp server" "a\"b" "100%" "x&y"`);
+
+  // Quoting applies to the command name too, exactly as it did before.
+  assert.equal(launchSpec('my tool', [], 'win32').command, '"my tool"');
+
+  // Paths and executables still skip the shell and keep their argv intact.
+  const node = String.raw`C:\Program Files\nodejs\node.exe`;
+  assert.deepEqual(launchSpec(node, ['server.js', 'a b'], 'win32'), {
+    command: node,
+    args: ['server.js', 'a b'],
+    shell: false,
+  });
+  assert.deepEqual(launchSpec('npx', ['-y', 'x'], 'linux'), { command: 'npx', args: ['-y', 'x'], shell: false });
+});
+
+test('a shim launched through the shell runs its arguments and raises no DEP0190', { skip: process.platform !== 'win32' }, async () => {
+  const { launchSpec } = await import('../src/proxy.js');
+  const { spawnSync } = await import('node:child_process');
+
+  // `node` is a bare name, so it takes the shell path, as `npx` would. The
+  // spawn happens in a child so its stderr, where the warning lands, is ours to read.
+  const spec = launchSpec('node', ['-e', 'process.stdout.write(process.argv[1])', 'two words']);
+  assert.equal(spec.shell, true);
+  const probe =
+    `const r = require('node:child_process').spawnSync(${JSON.stringify(spec.command)}, ` +
+    `${JSON.stringify(spec.args)}, { shell: true, encoding: 'utf8' });` +
+    `process.stdout.write(r.stdout); process.stderr.write(r.stderr);`;
+  const res = spawnSync(process.execPath, ['-e', probe], { encoding: 'utf8' });
+  assert.equal(res.stdout, 'two words', 'a spaced argument must arrive as one argument');
+  assert.doesNotMatch(res.stderr, /DEP0190/);
 });
 
 test('a budget with no metric extractor behind it is reported, not silently inert', async () => {

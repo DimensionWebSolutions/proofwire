@@ -133,17 +133,24 @@ function winQuote(s) {
  * So: a command that names a path or an executable is spawned directly; a bare
  * name, which might be a shim, goes through the shell with everything quoted.
  *
+ * The shell path hands Node one finished command line and no argv. Node would
+ * only join the pieces with spaces itself, which is the same string cmd.exe
+ * ends up with. But given separate args with `shell: true` it also prints
+ * DEP0190, a warning that exists precisely because Node does not quote them.
+ * We already have, so we pass the result, not the parts.
+ *
  * @param {string} command
  * @param {string[]} args
+ * @param {NodeJS.Platform} [platform]  For tests; defaults to this machine's.
  * @returns {{ command: string, args: string[], shell: boolean }}
  */
-export function launchSpec(command, args) {
-  if (process.platform !== 'win32') return { command, args, shell: false };
+export function launchSpec(command, args, platform = process.platform) {
+  if (platform !== 'win32') return { command, args, shell: false };
 
   const namesAPath = /[\\/]/.test(command) || /\.(exe|com)$/i.test(command);
   if (namesAPath) return { command, args, shell: false };
 
-  return { command: winQuote(command), args: args.map(winQuote), shell: true };
+  return { command: [command, ...args].map(winQuote).join(' '), args: [], shell: true };
 }
 
 /**
