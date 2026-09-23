@@ -56,6 +56,17 @@ release together at the same version.
 
 ### Added
 
+- **Retention for hub copies of receipts** (HUB.md, *Retention*). An
+  organisation's admins set a period (`PUT /v1/settings/retention`), and an
+  operator can cap it per plan (`proofwire-hub retention <org> --cap N`); the
+  shorter applies. An hourly sweep clears the body of each older receipt and
+  every column that could identify someone, and keeps seq, hash, prev and four
+  non-identifying facts. The tree is built from the hashes, so roots,
+  checkpoints, witness signatures, inclusion proofs, the self-audit and
+  further ingest all keep working. Pruned receipts answer `410 pruned` with
+  their hash, and are left out of listings and bundles. Agents' local logs are
+  untouched. A period under six months returns a warning citing the EU AI Act's
+  record-keeping minimum. Shown on the console's Settings page.
 - **`pw report`: an evidence pack for auditors** ([`docs/EVIDENCE.md`](docs/EVIDENCE.md)).
   One directory holding `report.html` (self-contained, no scripts),
   `evidence.bundle.json` (verifiable with `pw check`), `summary.json` and

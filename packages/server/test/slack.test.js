@@ -225,6 +225,9 @@ test("the console's settings show Slack as connected, and never the credentials"
   assert.match(html, /U024BE7LH/);
   assert.ok(!html.includes(SECRET), 'the signing secret is on the page');
   assert.ok(!html.includes('/webhook/acme'), 'the webhook URL is on the page');
+  // The retention panel renders beside it.
+  assert.match(html, /<h2>Retention<\/h2>/);
+  assert.match(html, /kept on the hub<\/dt><dd><b>forever<\/b>/);
 });
 
 // ── the flow ───────────────────────────────────────────────────────────────

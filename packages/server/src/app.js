@@ -425,7 +425,62 @@ export class Hub {
       const log = this._log(ctx.principal, ctx.params.log);
       const row = this.store.receipt(ctx.principal.orgId, log.id, Number(ctx.params.seq));
       if (!row) throw new StoreError(404, 'no_such_entry', 'no such entry in this log');
+      if (row.pruned_at) {
+        // Gone by the organisation's own retention. Its hash is still in the
+        // tree, so an inclusion proof for it works; the content is with the
+        // agent's local log, or an export taken before.
+        throw new StoreError(410, 'pruned', `entry ${row.seq} was pruned by retention on ${row.pruned_at}`, {
+          seq: row.seq,
+          hash: row.hash,
+          ts: row.ts,
+          prunedAt: row.pruned_at,
+        });
+      }
       return { receipt: JSON.parse(row.body), receivedAt: row.received_at };
+    });
+
+    // ── retention ───────────────────────────────────────────────────────
+    r.get('/v1/settings/retention', (ctx) => {
+      requireScope(ctx.principal, 'admin');
+      return this.store.retention(ctx.principal.orgId);
+    });
+
+    r.put('/v1/settings/retention', (ctx) => {
+      requireScope(ctx.principal, 'admin');
+      const raw = ctx.body?.days;
+      const days = raw === null || raw === 'forever' ? null : Number(raw);
+      if (days !== null && (!Number.isInteger(days) || days < 1 || days > 36_500)) {
+        throw new StoreError(400, 'bad_retention', 'days must be a whole number from 1 to 36500, or null to keep forever');
+      }
+      const { capDays } = this.store.retention(ctx.principal.orgId);
+      if (capDays !== null && (days === null || days > capDays)) {
+        throw new StoreError(
+          400,
+          'over_cap',
+          `this organization's plan keeps receipts at most ${capDays} days on the hub; choose ${capDays} or fewer`,
+          { capDays },
+        );
+      }
+      this.store.setRetention(ctx.principal.orgId, { days });
+      this.store.recordEvent({
+        orgId: ctx.principal.orgId,
+        actor: ctx.principal.label,
+        actorKind: ctx.principal.kind,
+        action: 'retention.set',
+        subject: days === null ? 'forever' : `${days} days`,
+        meta: { days },
+      });
+      const result = this.store.retention(ctx.principal.orgId);
+      if (result.effectiveDays !== null && result.effectiveDays < 183) {
+        return {
+          ...result,
+          warning:
+            'Shorter than six months: logs of high-risk AI systems must be kept at least that long under ' +
+            'the EU AI Act (Arts. 19 and 26(6)). The hub will prune sooner; keep the agents\' local logs or ' +
+            'exported evidence packs for the full period.',
+        };
+      }
+      return result;
     });
 
     r.get('/v1/receipts', (ctx) => {

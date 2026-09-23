@@ -369,6 +369,24 @@ const MIGRATIONS = [
       );
     `,
   },
+  {
+    id: '009_retention',
+    sql: `
+      -- How long the hub keeps the content of receipts, per organisation. NULL
+      -- is forever. The cap is the operator's (a hosted plan's limit); the
+      -- organisation's admins may choose anything up to it.
+      ALTER TABLE orgs ADD COLUMN retention_days INTEGER;
+      ALTER TABLE orgs ADD COLUMN retention_cap_days INTEGER;
+
+      -- A pruned receipt keeps its place in the log (seq, hash, prev) and the
+      -- non-identifying facts (ts, phase, kind, outcome); its body and every
+      -- column that could name a person or a customer are cleared. The Merkle
+      -- tree is built from the hashes, so roots, checkpoints and witness
+      -- signatures stay verifiable after pruning.
+      ALTER TABLE receipts ADD COLUMN pruned_at TEXT;
+      CREATE INDEX idx_receipts_unpruned ON receipts(org_id, ts) WHERE pruned_at IS NULL;
+    `,
+  },
 ];
 
 /**

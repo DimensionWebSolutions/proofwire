@@ -117,6 +117,52 @@ limit reveals nothing about which accounts exist.
 
 ---
 
+## Retention
+
+By default the hub keeps every receipt forever. An organisation can choose a
+retention period, and the operator of a hosted hub can cap it at what the plan
+includes:
+
+```bash
+# An admin of the organisation, over the API:
+curl -X PUT https://hub.example/v1/settings/retention \
+  -H "authorization: Bearer $ADMIN_KEY" -H 'content-type: application/json' \
+  -d '{"days": 365}'
+
+# The operator, on the host. The cap exists only here, not in the API:
+proofwire-hub retention acme --cap 365
+proofwire-hub retention acme                  # show
+```
+
+The hub applies the shorter of the two, sweeping hourly
+(`PROOFWIRE_RETENTION_SWEEP_MINUTES`).
+
+**What pruning does.** A receipt older than the period loses its signed body
+and every column that could name a person or a customer: tool, principal,
+agent, session, metrics and result. It keeps its sequence number, its hash, its
+link to the previous receipt, and four facts that identify nobody: when, what
+phase, what kind of action, and the outcome.
+
+**What it doesn't break.** The log's Merkle tree is built from those hashes,
+so after pruning:
+
+- the root is unchanged;
+- every checkpoint and every witness signature still verifies;
+- an inclusion proof for a pruned receipt still works;
+- the hub's self-audit still checks the whole chain, including across pruned
+  rows, and still catches a tampered one;
+- agents keep pushing, and the chain continues.
+
+A pruned receipt answers `410 pruned` with its hash. Bundles leave pruned
+receipts out and say so (`partial: true`), and every entry they do carry
+still proves inclusion in the full tree.
+
+**What it doesn't touch: your agents' local logs.** They are the
+authoritative copy and keep everything. Setting a period under six months
+returns a warning, because the EU AI Act asks for logs of high-risk systems to
+be kept at least that long (Arts. 19 and 26(6)). If the hub keeps less, keep the
+local logs, or `pw report` evidence packs, for the full period.
+
 ## Keys
 
 By default the hub generates its own Ed25519 keys and stores them in its
@@ -480,6 +526,8 @@ GET    /v1/keys · POST /v1/keys · DELETE /v1/keys/:id
 GET    /v1/members · POST /v1/members
 GET    /v1/events                        the hub's own hash-chained audit trail
 GET    /v1/usage
+GET    /v1/settings/retention            period, plan cap, pruned so far  (admin)
+PUT    /v1/settings/retention            { days | null }  (admin; not above the cap)
 ```
 
 ### Ingest semantics

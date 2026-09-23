@@ -18,6 +18,7 @@ import {
  *                                       rebind a log to a rotated signing key
  *   proofwire-hub check                 verify every stored log
  *   proofwire-hub identity [--json]     this node's public keys, for publishing
+ *   proofwire-hub retention <org> [--days N|forever] [--cap N|none]
  *
  * PROOFWIRE_WITNESS_ONLY=1 turns the server into a witness and nothing else:
  * see WITNESS_ONLY_ROUTES in app.js for the whole of what it then answers.
@@ -118,6 +119,27 @@ async function serve() {
       }
     }, interval * 60_000);
     timer.unref();
+  }
+
+  // Retention: clear the content of receipts past each organisation's
+  // retention period. Hourly is plenty for a period measured in days; the
+  // first run is a minute after start, not at start, so a restart loop can't
+  // turn into a pruning loop.
+  const sweepMinutes = Number(process.env.PROOFWIRE_RETENTION_SWEEP_MINUTES ?? 60);
+  if (sweepMinutes > 0) {
+    const sweep = () => {
+      try {
+        for (const r of hub.store.pruneExpired()) {
+          if (r.pruned > 0) {
+            console.error(JSON.stringify({ level: 'info', event: 'retention.pruned', org: r.orgId, pruned: r.pruned, before: r.before }));
+          }
+        }
+      } catch (err) {
+        console.error(JSON.stringify({ level: 'error', event: 'retention.failed', message: /** @type {Error} */ (err).message }));
+      }
+    };
+    setTimeout(sweep, 60_000).unref();
+    setInterval(sweep, sweepMinutes * 60_000).unref();
   }
 
   if (scheduleBackups(hub.config.database)) {
@@ -277,6 +299,87 @@ async function witnessKey() {
   console.error('');
 
   await hub.close();
+}
+
+/**
+ * Show or set an organisation's retention, from the host.
+ *
+ *   proofwire-hub retention <org>                     show
+ *   proofwire-hub retention <org> --cap 365           the plan's limit (operator only)
+ *   proofwire-hub retention <org> --days 90           the organisation's own choice
+ *   proofwire-hub retention <org> --days forever --cap none
+ *
+ * The cap exists only here, not in the API: an organisation's admins can
+ * shorten what the hub keeps, but only the operator can decide how long the
+ * hub is willing to keep it.
+ */
+async function retention() {
+  const args = process.argv.slice(3);
+  const slug = args[0];
+  const flag = (/** @type {string} */ name) => {
+    const i = args.indexOf(name);
+    return i === -1 ? undefined : args[i + 1];
+  };
+  if (!slug || slug.startsWith('--')) {
+    console.error(RED('  usage: proofwire-hub retention <org> [--days N|forever] [--cap N|none]'));
+    process.exitCode = 2;
+    return;
+  }
+  const parse = (/** @type {string | undefined} */ v, /** @type {string} */ none) => {
+    if (v === undefined) return undefined;
+    if (v === none) return null;
+    const n = Number(v);
+    if (!Number.isInteger(n) || n < 1 || n > 36_500) throw new Error(`expected a number of days (1 to 36500) or "${none}", got "${v}"`);
+    return n;
+  };
+
+  const hub = new Hub(configFromEnv());
+  try {
+    const org = hub.store.orgBySlug(slug);
+    if (!org) {
+      console.error(RED(`  no organization "${slug}"`));
+      process.exitCode = 1;
+      return;
+    }
+    let days;
+    let capDays;
+    try {
+      days = parse(flag('--days'), 'forever');
+      capDays = parse(flag('--cap'), 'none');
+    } catch (err) {
+      console.error(RED(`  ${/** @type {Error} */ (err).message}`));
+      process.exitCode = 2;
+      return;
+    }
+    /** @type {{ days?: number | null, capDays?: number | null }} */
+    const set = {};
+    if (days !== undefined) set.days = days;
+    if (capDays !== undefined) set.capDays = capDays;
+    if (Object.keys(set).length) {
+      hub.store.setRetention(org.id, set);
+      hub.store.recordEvent({
+        orgId: org.id,
+        actor: 'operator',
+        actorKind: 'system',
+        action: 'retention.set',
+        subject: slug,
+        meta: set,
+      });
+    }
+    const r = hub.store.retention(org.id);
+    const show = (/** @type {number | null} */ d) => (d === null ? 'forever' : `${d} days`);
+    console.error('');
+    console.error(B(`  Retention · ${slug}`));
+    console.error(DIM('  ─────────────────────────────────────────────'));
+    console.error(`  org choice  ${show(r.days)}`);
+    console.error(`  plan cap    ${r.capDays === null ? 'none' : `${r.capDays} days`}`);
+    console.error(`  applied     ${B(show(r.effectiveDays))}`);
+    console.error(`  pruned      ${r.pruned} receipt(s) so far`);
+    console.error(`  oldest kept ${r.oldest ?? '—'}`);
+    console.error('');
+  } finally {
+    await hub.close();
+  }
 }
 
 /**
@@ -447,6 +550,7 @@ const COMMANDS = {
   'witness-key': witnessKey,
   'witness-rebind': witnessRebind,
   identity,
+  retention,
   check,
   backup: cmdBackup,
   'verify-backup': cmdVerifyBackup,

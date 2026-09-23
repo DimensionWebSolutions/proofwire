@@ -403,7 +403,9 @@ export class Store {
    * @returns {{ entries: object[], total: number }}
    */
   receipts(orgId, q = {}) {
-    const where = ['org_id = ?'];
+    // Pruned receipts have no content left to list; they still count in the
+    // log's size and tree, which is where their existence is proven.
+    const where = ['org_id = ?', 'pruned_at IS NULL'];
     const params = [orgId];
 
     if (q.logId) { where.push('log_id = ?'); params.push(q.logId); }
@@ -647,6 +649,94 @@ export class Store {
     return { kid: args.kid, public_key: args.publicKey, bound_at: boundAt, bound_by: args.by };
   }
 
+  // ── retention ─────────────────────────────────────────────────────────
+
+  /**
+   * @param {string} orgId
+   * @returns {{ days: number | null, capDays: number | null, effectiveDays: number | null, pruned: number, oldest: string | null }}
+   */
+  retention(orgId) {
+    const org = this.org(orgId);
+    const days = org?.retention_days ?? null;
+    const capDays = org?.retention_cap_days ?? null;
+    const counts = this.db
+      .prepare(
+        `SELECT sum(pruned_at IS NOT NULL) AS pruned, min(CASE WHEN pruned_at IS NULL THEN ts END) AS oldest
+         FROM receipts WHERE org_id = ?`,
+      )
+      .get(orgId);
+    return {
+      days,
+      capDays,
+      effectiveDays: effectiveRetention(days, capDays),
+      pruned: counts?.pruned ?? 0,
+      oldest: counts?.oldest ?? null,
+    };
+  }
+
+  /**
+   * @param {string} orgId
+   * @param {{ days?: number | null, capDays?: number | null }} set  Only the keys given change.
+   */
+  setRetention(orgId, set) {
+    if ('days' in set) this.db.prepare('UPDATE orgs SET retention_days = ? WHERE id = ?').run(set.days, orgId);
+    if ('capDays' in set) this.db.prepare('UPDATE orgs SET retention_cap_days = ? WHERE id = ?').run(set.capDays, orgId);
+  }
+
+  /**
+   * Clear the content of an organisation's receipts older than `before`.
+   *
+   * What goes: the signed body and every column that could identify a person,
+   * a customer or a deal: tool, principal, agent, session, metrics, result.
+   * What stays: seq, hash and prev, which hold the log's structure, plus ts,
+   * phase, kind and outcome, which say nothing about anyone. The tree is built
+   * from the hashes, so roots, checkpoints and witness signatures still verify.
+   *
+   * @param {string} orgId
+   * @param {string} before  ISO time; receipts strictly older are pruned.
+   * @returns {number} How many were pruned now.
+   */
+  prune(orgId, before) {
+    return this.db
+      .prepare(
+        `UPDATE receipts SET body = '', target = '', principal = '', agent = '', session = '',
+           metrics = '{}', status = NULL, latency_ms = NULL, pruned_at = ?
+         WHERE org_id = ? AND ts < ? AND pruned_at IS NULL`,
+      )
+      .run(now(), orgId, before).changes;
+  }
+
+  /**
+   * Apply every organisation's retention. Run on a schedule by `serve`.
+   *
+   * @param {number} [nowMs]
+   * @returns {{ orgId: string, before: string, pruned: number }[]}
+   */
+  pruneExpired(nowMs = Date.now()) {
+    const out = [];
+    const orgs = this.db
+      .prepare('SELECT id, retention_days, retention_cap_days FROM orgs WHERE retention_days IS NOT NULL OR retention_cap_days IS NOT NULL')
+      .all();
+    for (const org of orgs) {
+      const days = effectiveRetention(org.retention_days, org.retention_cap_days);
+      if (days === null) continue;
+      const before = new Date(nowMs - days * 86_400_000).toISOString();
+      const pruned = this.prune(org.id, before);
+      if (pruned > 0) {
+        this.recordEvent({
+          orgId: org.id,
+          actor: 'retention',
+          actorKind: 'system',
+          action: 'retention.pruned',
+          subject: `${pruned} receipt(s)`,
+          meta: { pruned, before, days },
+        });
+      }
+      out.push({ orgId: org.id, before, pruned });
+    }
+    return out;
+  }
+
   // ── integrations ──────────────────────────────────────────────────────
 
   /**
@@ -704,13 +794,29 @@ export class Store {
     const issues = [];
     const keyring = { [log.kid]: log.public_key };
     const rows = this.db
-      .prepare('SELECT seq, hash, body FROM receipts WHERE log_id = ? ORDER BY seq ASC')
+      .prepare('SELECT seq, hash, prev, body, pruned_at FROM receipts WHERE log_id = ? ORDER BY seq ASC')
       .all(log.id);
 
     let prev = GENESIS_PREV;
     const tree = new MerkleTree();
 
     for (const [i, row] of rows.entries()) {
+      if (row.pruned_at) {
+        // Retention cleared this receipt's content. What is left still has to
+        // link: its stored prev must be the hash before it, and the next
+        // receipt, whose signature covers its own prev, must name this hash.
+        // The tree is rebuilt from the same hashes, so the root and every
+        // checkpoint are still checked in full below.
+        if (row.seq !== i) {
+          issues.push({ kind: 'sequence', seq: row.seq, message: `expected seq ${i}, stored ${row.seq}` });
+        }
+        if (row.prev !== prev) {
+          issues.push({ kind: 'chain', seq: row.seq, message: `chain break at ${row.seq} (pruned)` });
+        }
+        prev = row.hash;
+        tree.append(unhex(row.hash));
+        continue;
+      }
       const receipt = JSON.parse(row.body);
       for (const issue of verifyReceipt(receipt, keyring)) {
         issues.push({ kind: issue.kind, seq: row.seq, message: issue.message });
@@ -783,7 +889,9 @@ export class Store {
     const log = this.log(orgId, logId);
     if (!log) throw new StoreError(404, 'no_such_log', 'no such log in this organization');
 
-    const where = ['log_id = ?'];
+    // Pruned receipts have no body to ship. Leaving them out makes the bundle
+    // partial, and every entry in it still proves inclusion in the full tree.
+    const where = ['log_id = ?', 'pruned_at IS NULL'];
     const params = [log.id];
     if (opts.since) { where.push('ts >= ?'); params.push(opts.since); }
     if (opts.until) { where.push('ts <= ?'); params.push(opts.until); }
@@ -1088,3 +1196,17 @@ export class StoreError extends Error {
 }
 
 export { verifyInclusion };
+
+/**
+ * The retention actually applied: the organisation's choice, never longer
+ * than the operator's cap. Null is forever.
+ *
+ * @param {number | null} days
+ * @param {number | null} capDays
+ * @returns {number | null}
+ */
+export function effectiveRetention(days, capDays) {
+  if (days == null) return capDays ?? null;
+  if (capDays == null) return days;
+  return Math.min(days, capDays);
+}

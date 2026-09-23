@@ -716,7 +716,32 @@ function settings(hub, ctx) {
 
   ${slackPanel(hub, ctx)}
 
+  ${retentionPanel(hub, ctx)}
+
   ${identity}`;
+}
+
+/**
+ * How long the hub keeps receipt content, and what that does and doesn't
+ * affect.
+ *
+ * @param {import('./app.js').Hub} hub
+ * @param {import('./http.js').Ctx} ctx
+ */
+function retentionPanel(hub, ctx) {
+  const r = hub.store.retention(ctx.principal.orgId);
+  const show = (/** @type {number | null} */ d) => (d === null ? 'forever' : `${d} days`);
+  return `<h2>Retention</h2>
+    <div class="panel" style="padding:16px">
+      <dl class="kv">
+        <dt>kept on the hub</dt><dd><b>${esc(show(r.effectiveDays))}</b>${r.capDays !== null ? ` <span class="dim">(plan limit ${esc(r.capDays)} days)</span>` : ''}</dd>
+        <dt>pruned so far</dt><dd>${esc(r.pruned)} receipt(s)</dd>
+        <dt>oldest kept</dt><dd class="dim">${esc(r.oldest ?? '—')}</dd>
+      </dl>
+      <p class="dim" style="font-size:12px;margin:12px 0 0">After this period the hub clears what a receipt says and keeps
+      its hash, so the log's root, checkpoints and witness signatures still verify. Your agents' local logs are not
+      affected. Change it with <span class="mono">PUT /v1/settings/retention</span>.</p>
+    </div>`;
 }
 
 /**
