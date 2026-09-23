@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { randomBytes } from 'node:crypto';
 import { identityFromPublicKey } from '@proof_wire/core';
-import { Hub, DEFAULT_CONFIG, VERSION } from './app.js';
+import { Hub, VERSION } from './app.js';
 import { Auth } from './auth.js';
 import { selfTest } from './signer.js';
 import {
@@ -26,7 +26,7 @@ import {
  * more thing to get wrong in a container.
  */
 
-/** @returns {Partial<typeof DEFAULT_CONFIG>} */
+/** @returns {Partial<typeof import('./app.js').DEFAULT_CONFIG>} */
 function configFromEnv() {
   const env = process.env;
   /** @type {any} */

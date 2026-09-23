@@ -1,6 +1,5 @@
 import http from 'node:http';
 import fs from 'node:fs';
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { ProofLog } from '@proof_wire/core';
@@ -25,20 +24,12 @@ const TYPES = {
 };
 
 /**
- * The page's one inline script, allowed by hash rather than by
- * `'unsafe-inline'`: a string from the log that somehow became markup still
- * could not run, because its hash would not be on the list.
+ * Scripts only from this server's own files, never inline: a string from the
+ * log that somehow became markup still could not run.
  */
-function inlineScriptHashes() {
-  const html = fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8');
-  return [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)].map(
-    (m) => `'sha256-${createHash('sha256').update(m[1], 'utf8').digest('base64')}'`,
-  );
-}
-
 const PAGE_CSP = [
   "default-src 'none'",
-  `script-src ${inlineScriptHashes().join(' ')}`,
+  "script-src 'self'",
   "style-src 'unsafe-inline'",
   "img-src 'self' data:",
   "connect-src 'self'",

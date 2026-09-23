@@ -186,10 +186,10 @@ export class Hub {
     }
 
     const cookies = parseCookies(req.headers.cookie);
-    const user = this.auth.userForSession(cookies.pw_session);
+    const user = this.auth.userForSession(cookies.get('pw_session'));
     if (!user) return null;
 
-    const wanted = url.searchParams.get('org') ?? cookies.pw_org ?? null;
+    const wanted = url.searchParams.get('org') ?? cookies.get('pw_org') ?? null;
     const orgs = this.auth.orgsFor(user.id);
     if (orgs.length === 0) return null;
 
@@ -303,7 +303,7 @@ export class Hub {
 
     r.post('/v1/auth/logout', (ctx) => {
       const cookies = parseCookies(ctx.req.headers.cookie);
-      if (cookies.pw_session) this.auth.revokeSession(cookies.pw_session);
+      if (cookies.get('pw_session')) this.auth.revokeSession(cookies.get('pw_session'));
       ctx.res.setHeader('set-cookie', [
         cookie('pw_session', '', { maxAge: 0 }),
         cookie('pw_org', '', { maxAge: 0 }),
@@ -1160,7 +1160,7 @@ export class Hub {
 
     r.post('/logout', (ctx) => {
       const cookies = parseCookies(ctx.req.headers.cookie);
-      if (cookies.pw_session) this.auth.revokeSession(cookies.pw_session);
+      if (cookies.get('pw_session')) this.auth.revokeSession(cookies.get('pw_session'));
       return {
         __redirect: '/login',
         cookies: [cookie('pw_session', '', { maxAge: 0 }), cookie('pw_org', '', { maxAge: 0 })],

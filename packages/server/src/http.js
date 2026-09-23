@@ -317,10 +317,10 @@ export function sendHtml(res, status, html, headers = {}) {
  * @returns {Record<string,string>}
  */
 export function parseCookies(header) {
-  // No prototype: a cookie named `__proto__` or `constructor` is just a
-  // cookie, not a way to reach Object.prototype.
-  /** @type {Record<string,string>} */
-  const out = Object.create(null);
+  // A Map, not an object: a cookie named `__proto__` or `constructor` is
+  // just a cookie, never a property of anything.
+  /** @type {Map<string, string>} */
+  const out = new Map();
   if (!header) return out;
   for (const part of header.split(';')) {
     const eq = part.indexOf('=');
@@ -331,7 +331,7 @@ export function parseCookies(header) {
     } catch {
       continue; // A malformed %-escape is a broken cookie, not a 500.
     }
-    out[part.slice(0, eq).trim()] = value;
+    out.set(part.slice(0, eq).trim(), value);
   }
   return out;
 }

@@ -136,9 +136,20 @@ const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
  * @returns {string}
  */
 export function winQuote(arg, shim = false) {
-  let s = String(arg)
-    .replace(/(\\*)"/g, '$1$1\\"')
-    .replace(/(\\*)$/, '$1$1');
+  let s = '';
+  let slashes = 0;
+  for (const ch of String(arg)) {
+    if (ch === '\\') {
+      slashes++;
+      continue;
+    }
+    // Backslashes are only special in front of a quote: double them there,
+    // then escape the quote itself.
+    s += ch === '"' ? '\\'.repeat(slashes * 2 + 1) + '"' : '\\'.repeat(slashes) + ch;
+    slashes = 0;
+  }
+  // ...and in front of the closing quote.
+  s += '\\'.repeat(slashes * 2);
   s = `"${s}"`.replace(CMD_META, '^$1');
   return shim ? s.replace(CMD_META, '^$1') : s;
 }

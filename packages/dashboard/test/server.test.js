@@ -4,7 +4,6 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
-import { createHash } from 'node:crypto';
 import { ProofLog } from '@proof_wire/core';
 import { createServer, allowedHosts, insideRoot } from '../src/server.js';
 
@@ -64,7 +63,7 @@ test('a request naming a foreign Host is refused, so DNS rebinding reads nothing
   }
 });
 
-test('the page is served under a CSP that allows its own script by hash and nothing inline besides', async () => {
+test('the page is served under a CSP that runs only its own script file, nothing inline', async () => {
   const { server, port } = await start();
   try {
     const page = await get(port, '/', `127.0.0.1:${port}`);
@@ -76,13 +75,15 @@ test('the page is served under a CSP that allows its own script by hash and noth
     assert.equal(page.headers['x-frame-options'], 'DENY');
     assert.equal(page.headers['referrer-policy'], 'no-referrer');
 
-    // Every script on the page must be covered, or the dashboard renders blank.
-    const scripts = [...page.body.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)];
-    assert.ok(scripts.length > 0);
-    for (const [, code] of scripts) {
-      const hash = createHash('sha256').update(code, 'utf8').digest('base64');
-      assert.ok(csp.includes(`'sha256-${hash}'`), 'an inline script is missing from script-src');
-    }
+    assert.match(csp, /script-src 'self'(;|$)/);
+
+    // The policy allows no inline script, so the page must not contain one:
+    // every <script> has a src, and that file is served as JavaScript.
+    assert.match(page.body, /<script type="module" src="app.js"><\/script>/);
+    assert.equal(page.body.split('<script').length - 1, 1, 'exactly one script tag');
+    const app = await get(port, '/app.js', `127.0.0.1:${port}`);
+    assert.equal(app.status, 200);
+    assert.match(String(app.headers['content-type']), /^text\/javascript/);
   } finally {
     server.close();
   }
@@ -91,7 +92,7 @@ test('the page is served under a CSP that allows its own script by hash and noth
 test('paths cannot walk out of the public directory', async () => {
   const { server, port } = await start();
   try {
-    for (const p of ['/../package.json', '/..%2fpackage.json', '/%2e%2e/package.json', '/..\package.json']) {
+    for (const p of ['/../package.json', '/..%2fpackage.json', '/%2e%2e/package.json', String.raw`/..\package.json`]) {
       const res = await get(port, p, `127.0.0.1:${port}`);
       assert.notEqual(res.status, 200, p);
       assert.doesNotMatch(res.body, /"name": "@proof_wire\/dashboard"/, p);
