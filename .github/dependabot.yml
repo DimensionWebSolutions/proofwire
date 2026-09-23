@@ -11,6 +11,16 @@ updates:
     groups:
       actions:
         patterns: ['*']
+  # The Node base image in the Dockerfile, and the digest-pinned Caddy image
+  # in deploy/compose.yml.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+  - package-ecosystem: docker-compose
+    directory: /deploy
+    schedule:
+      interval: weekly
   - package-ecosystem: npm
     directory: /
     schedule:

@@ -244,6 +244,10 @@ page's "Get notified" waitlist with something real for the first cohort,
 and enough to start Month 3–9's actual goal: proving anyone uses it before
 building billing for it.
 
+*Ready to run:* [`DEPLOY.md`](DEPLOY.md) and `deploy/` take a server and a
+domain to a witness on HTTPS, with its key printed for publishing. CI runs the
+kit on every push. What's missing is only the domain and the server.
+
 **Phase 2 — billed, multiple nodes.** Self-serve signup, Stripe metering,
 the second and third nodes the Team tier promises, a public status page,
 the backup/restore question in item 5 actually resolved rather than noted.

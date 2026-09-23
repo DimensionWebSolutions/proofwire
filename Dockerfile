@@ -27,7 +27,7 @@ COPY packages/proxy  packages/proxy
 COPY packages/cli    packages/cli
 COPY packages/server packages/server
 
-RUN mkdir -p /data && chown -R proofwire:proofwire /data /app
+RUN mkdir -p /data /backups && chown -R proofwire:proofwire /data /backups /app
 USER proofwire
 
 ENV NODE_ENV=production \

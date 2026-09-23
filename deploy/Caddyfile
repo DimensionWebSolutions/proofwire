@@ -1,0 +1,37 @@
+# TLS and the edge for a Proofwire node. See compose.yml and docs/DEPLOY.md.
+{
+	# Nothing on this server reconfigures Caddy while it runs, so the admin
+	# API would only be one more way to.
+	admin off
+	# With "tls internal", do not try to add Caddy's test CA to this
+	# container's trust store: nothing here should trust it.
+	skip_install_trust
+}
+
+{$PROOFWIRE_DOMAIN} {
+	# Your email for Let's Encrypt, or "internal" for a self-signed test
+	# certificate (used by CI, and by a dry run before DNS is set up).
+	tls {$PROOFWIRE_TLS}
+
+	# The node refuses bodies over 8 MB; refuse them here, before they arrive.
+	request_body {
+		max_size 9MB
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		-Server
+	}
+
+	# Caddy replaces any X-Forwarded-For a client sends with the address it
+	# actually saw (it trusts no upstream proxies unless told to), which is
+	# what makes PROOFWIRE_TRUST_PROXY=1 safe behind it.
+	reverse_proxy node:8787
+
+	log {
+		output stdout
+		format json
+	}
+}

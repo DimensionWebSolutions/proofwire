@@ -9,8 +9,8 @@ release together at the same version.
 
 - **`pw dash` refuses requests whose `Host` is not its own**, which closes DNS
   rebinding: a web page could previously point its own domain at `127.0.0.1`
-  and read the local dashboard's receipts. The page is also served with a CSP
-  that allows only its own inline script, by hash, and forbids framing. Internal
+  and read the local dashboard's receipts. The page's script moved to its own
+  file, and the CSP allows only this server's scripts and forbids framing. Internal
   errors no longer echo their message, which could include file paths.
 - **Hub sign-in no longer reveals which emails have accounts.** An unknown
   address now costs the same scrypt as a wrong password.
@@ -25,7 +25,6 @@ release together at the same version.
   default to a read-only token, and CodeQL and Dependabot are configured.
   `scripts/repo-hygiene.mjs` blocks keys, salts, environment and database files,
   and token-shaped strings in CI and in the release preflight.
-
 - **Windows: an argument could break out of its quotes and run a second
   command.** The quoting escaped `"` for the program but not for cmd.exe, which
   ignores backslash escapes, so `x"&echo PWNED` ran `echo`. The arguments come
@@ -57,6 +56,17 @@ release together at the same version.
 
 ### Added
 
+- **A production deployment kit, `deploy/`, with a runbook,
+  [`docs/DEPLOY.md`](docs/DEPLOY.md).** Takes one Linux server and a domain to
+  a Proofwire node on HTTPS: Caddy in front (automatic Let's Encrypt
+  certificates, HTTP to HTTPS, HSTS), the node's port never published, both
+  containers read-only with capabilities dropped, Caddy pinned by digest,
+  scheduled backups to their own volume, and log rotation. `setup.sh` checks
+  the prerequisites, waits for HTTPS, and prints the node's keys. Witness-only
+  by default; one setting makes it a hub. CI runs the kit on every push and
+  drives a customer's co-signing through its TLS.
+- **`proofwire-hub identity [--json]`** prints the node's public keys from the
+  host, with the command that publishes the witness key.
 - **`pw policy test [policy-file]`** replays the local log against a policy and
   lists every call whose verdict would change, such as `deny → allow`, with the
   rule responsible. Each call is judged at its recorded time, against only what

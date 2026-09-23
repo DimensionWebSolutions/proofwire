@@ -37,6 +37,10 @@ docker compose up -d
 docker compose exec hub node packages/server/src/bin.js bootstrap
 ```
 
+That runs on your machine over plain HTTP, for trying it out. **For a real
+server** with a domain, automatic HTTPS and a hardened setup, use `deploy/`:
+[`docs/DEPLOY.md`](DEPLOY.md) walks through it end to end.
+
 > **Built and driven for real:** CI's `docker` job builds this image, boots it,
 > registers a log, signs and pushes receipts, checkpoints, fetches the bundle back
 > and verifies it, confirms a bad token is refused, and checks the container

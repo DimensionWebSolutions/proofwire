@@ -17,6 +17,7 @@ import {
  *   proofwire-hub witness-rebind <customer> <log> <public key>
  *                                       rebind a log to a rotated signing key
  *   proofwire-hub check                 verify every stored log
+ *   proofwire-hub identity [--json]     this node's public keys, for publishing
  *
  * PROOFWIRE_WITNESS_ONLY=1 turns the server into a witness and nothing else:
  * see WITNESS_ONLY_ROUTES in app.js for the whole of what it then answers.
@@ -279,6 +280,51 @@ async function witnessKey() {
 }
 
 /**
+ * Print this node's public keys, from the host.
+ *
+ * Read-only apart from one thing: on a node that has never started, opening
+ * it creates its keys, as `serve` would. The keys are what gets published in
+ * `witnesses/keys.json` and handed to auditors, so they must come from here
+ * rather than from the node's own HTTP API: a key a server serves about
+ * itself is only as trustworthy as that server.
+ *
+ *   proofwire-hub identity          for people
+ *   proofwire-hub identity --json   for scripts
+ */
+async function identity() {
+  const hub = new Hub(configFromEnv());
+  const witness = { kid: hub.witnessSigner.kid, publicKey: hub.witnessSigner.publicKey };
+  const own = hub.config.witnessOnly ? null : { kid: hub.hubSigner.kid, publicKey: hub.hubSigner.publicKey };
+  const url = hub.config.publicUrl || null;
+  await hub.close();
+
+  if (process.argv.includes('--json')) {
+    process.stdout.write(JSON.stringify({ url, witnessOnly: hub.config.witnessOnly, witness, hub: own }, null, 2) + '\n');
+    return;
+  }
+
+  const out = (/** @type {string} */ s = '') => process.stdout.write(s + '\n');
+  out('');
+  out(B(hub.config.witnessOnly ? '  This witness node' : '  This hub'));
+  out(DIM('  ─────────────────────────────────────────────'));
+  if (own) {
+    out(`  hub kid      ${own.kid}`);
+    out(`  hub key      ${own.publicKey}`);
+  }
+  out(`  witness kid  ${witness.kid}`);
+  out(`  witness key  ${witness.publicKey}`);
+  out('');
+  out(DIM('  To publish the witness key, from a checkout of the proofwire repo, in a commit of its own:'));
+  out(
+    `    ${CYAN(
+      `node scripts/witness-record.mjs add --operator Proofwire --public-key ${witness.publicKey}` +
+        (url ? ` --node ${url}` : ''),
+    )}`,
+  );
+  out('');
+}
+
+/**
  * Rebind a customer's log to a new signing key, after a rotation.
  *
  * This is the only way a witness's log-to-key binding changes after first
@@ -400,6 +446,7 @@ const COMMANDS = {
   bootstrap,
   'witness-key': witnessKey,
   'witness-rebind': witnessRebind,
+  identity,
   check,
   backup: cmdBackup,
   'verify-backup': cmdVerifyBackup,

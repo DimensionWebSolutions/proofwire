@@ -175,3 +175,85 @@ jobs:
         run: |
           docker logs hub || true
           docker logs witness || true
+
+  deploy-kit:
+    # deploy/ run exactly as docs/DEPLOY.md tells an operator to run it, with
+    # a self-signed certificate in place of a real domain. Then a customer's
+    # path through real TLS: key issued on the host, `pw remote add`, a
+    # co-signed checkpoint, and an auditor verifying it with the key that
+    # `identity` printed on the host.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - run: npm install --no-audit --no-fund
+
+      - name: First run creates .env and stops
+        working-directory: deploy
+        run: |
+          if ./setup.sh; then echo "::error::setup.sh ran with no configuration"; exit 1; fi
+          test -f .env
+          [ "$(stat -c %a .env)" = 600 ] || { echo "::error::.env is not 600"; exit 1; }
+
+      - name: Configure and bring it up
+        working-directory: deploy
+        run: |
+          sed -i 's/^PROOFWIRE_DOMAIN=.*/PROOFWIRE_DOMAIN=localhost/; s/^PROOFWIRE_TLS=.*/PROOFWIRE_TLS=internal/' .env
+          ./setup.sh | tee setup.out
+          grep -q 'witness-record.mjs add --operator Proofwire' setup.out
+
+      - name: Only Caddy faces the network
+        run: |
+          # HTTP is redirected to HTTPS.
+          code="$(curl -s -o /dev/null -w '%{http_code}' http://localhost/health)"
+          [ "$code" = 308 ] || { echo "::error::http gave $code, not a redirect"; exit 1; }
+          # HTTPS reaches the witness, with the edge headers set.
+          curl -fsSk https://localhost/.well-known/proofwire | grep -q '"proofwire-witness"'
+          curl -sSk -D headers.txt -o /dev/null https://localhost/health
+          grep -qi '^strict-transport-security:' headers.txt || { echo "::error::no HSTS"; cat headers.txt; exit 1; }
+          if grep -qi '^server:' headers.txt; then echo "::error::Server header leaked"; cat headers.txt; exit 1; fi
+          # The node's own port is not published.
+          if curl -s --max-time 3 http://localhost:8787/health; then echo "::error::node port is reachable"; exit 1; fi
+          # Witness-only: no console, no ingest.
+          [ "$(curl -sk -o /dev/null -w '%{http_code}' https://localhost/login)" = 404 ]
+          [ "$(curl -sk -o /dev/null -w '%{http_code}' -X POST https://localhost/v1/logs)" = 404 ]
+
+      - name: A customer co-signs through TLS, and an auditor verifies it
+        run: |
+          cd deploy
+          docker compose cp caddy:/data/caddy/pki/authorities/local/root.crt "$RUNNER_TEMP/caddy-root.crt"
+          docker compose exec -T node node packages/server/src/bin.js identity --json > "$RUNNER_TEMP/identity.json"
+          docker compose exec -T node node packages/server/src/bin.js witness-key "CI Customer" > "$RUNNER_TEMP/key.out" 2>&1
+          token="$(grep -oE 'pwk_[A-Za-z0-9._-]+' "$RUNNER_TEMP/key.out" | head -1)"
+          [ -n "$token" ] || { cat "$RUNNER_TEMP/key.out"; exit 1; }
+
+          export NODE_EXTRA_CA_CERTS="$RUNNER_TEMP/caddy-root.crt"
+          export HOME="$RUNNER_TEMP/home"; mkdir -p "$HOME"
+          pw="node $GITHUB_WORKSPACE/packages/cli/src/bin.js"
+          work="$RUNNER_TEMP/agent"; mkdir -p "$work"; cd "$work"
+          $pw init
+          printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query","arguments":{"sql":"SELECT 1"}}}' |
+            $pw proxy --no-remote -- node "$GITHUB_WORKSPACE/examples/fake-mcp-server.js" > /dev/null
+          $pw remote add --name witness --url https://localhost --token "$token"
+          $pw cosign --remote witness
+          $pw export evidence.json
+          pin="$(node -e "const j=require(process.argv[1]); process.stdout.write(j.witness.kid+'='+j.witness.publicKey)" "$RUNNER_TEMP/identity.json")"
+          $pw check evidence.json --witnesses 1 --witness-key "$pin"
+
+      - name: Backups land on their volume, and keys survive a restart
+        working-directory: deploy
+        run: |
+          docker compose exec -T node node packages/server/src/bin.js backup /backups/ci.db
+          docker compose exec -T node node packages/server/src/bin.js verify-backup /backups/ci.db
+          before="$(docker compose exec -T node node packages/server/src/bin.js identity --json)"
+          docker compose restart
+          ./setup.sh > /dev/null
+          after="$(docker compose exec -T node node packages/server/src/bin.js identity --json)"
+          [ "$before" = "$after" ] || { echo "::error::the node's keys changed across a restart"; exit 1; }
+
+      - name: Logs, on failure
+        if: failure()
+        working-directory: deploy
+        run: docker compose logs --tail 200 || true

@@ -152,6 +152,26 @@ test('.well-known names the witness key and nothing that could be mistaken for i
   assert.deepEqual(hub.store.serverKeys().map((k) => k.role), ['witness']);
 });
 
+test('identity, run on the host, prints the same witness key the node serves, and no hub key', async () => {
+  const res = cli(['identity', '--json'], { PROOFWIRE_PUBLIC_URL: 'https://witness1.example' });
+  assert.equal(res.status, 0, res.out);
+  const printed = JSON.parse(res.out);
+  const served = (await api('GET', '/.well-known/proofwire')).json;
+  assert.deepEqual(printed.witness, { kid: served.witness.kid, publicKey: served.witness.publicKey });
+  assert.equal(printed.hub, null);
+  assert.equal(printed.witnessOnly, true);
+  assert.equal(printed.url, 'https://witness1.example');
+
+  // The human form hands over the exact command that publishes the key.
+  const human = cli(['identity'], { PROOFWIRE_PUBLIC_URL: 'https://witness1.example' });
+  assert.ok(
+    human.out.includes(
+      `witness-record.mjs add --operator Proofwire --public-key ${served.witness.publicKey} --node https://witness1.example`,
+    ),
+    human.out,
+  );
+});
+
 test('it co-signs a real log\'s checkpoints, and an auditor pinning it can verify them', async () => {
   const logDir = path.join(dir, 'agent-log');
   const log = ProofLog.create(logDir);
