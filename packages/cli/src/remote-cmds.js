@@ -487,3 +487,92 @@ export async function cmdCosign(args) {
   out('');
   return 0;
 }
+
+/**
+ * `pw slack connect|status|test|disconnect` — Slack approvals for the hub's
+ * organization. Needs an admin key.
+ *
+ * The webhook URL and signing secret are credentials, so they can come from
+ * the environment rather than the command line, where they would land in
+ * shell history: PROOFWIRE_SLACK_WEBHOOK_URL and PROOFWIRE_SLACK_SIGNING_SECRET.
+ *
+ * @param {any} args
+ */
+export async function cmdSlack(args) {
+  const action = args._[1] ?? 'status';
+  const remote = resolveRemote(args);
+  const call = async (/** @type {string} */ method, /** @type {string} */ p, /** @type {any} */ body) => {
+    const res = await fetch(`${remote.url}/v1/integrations/slack${p}`, {
+      method,
+      headers: { authorization: `Bearer ${remote.token}`, 'content-type': 'application/json' },
+      body: body === undefined ? undefined : JSON.stringify(body),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(json.error?.message ?? `HTTP ${res.status}`);
+    return json;
+  };
+
+  try {
+    if (action === 'connect') {
+      const webhookUrl = args['webhook-url'] ?? process.env.PROOFWIRE_SLACK_WEBHOOK_URL;
+      const signingSecret = args['signing-secret'] ?? process.env.PROOFWIRE_SLACK_SIGNING_SECRET;
+      if (!webhookUrl || !signingSecret) {
+        bad('usage: pw slack connect --webhook-url <url> --signing-secret <secret> [--approver U123,U456]');
+        info('or set PROOFWIRE_SLACK_WEBHOOK_URL and PROOFWIRE_SLACK_SIGNING_SECRET, to keep them out of shell history.');
+        info('See docs/SLACK.md for creating the Slack app.');
+        return 2;
+      }
+      const approvers = args.approver ? String(args.approver).split(',').map((s) => s.trim()).filter(Boolean) : [];
+      const res = await call('PUT', '', { webhookUrl, signingSecret, approvers });
+      heading('Slack connected');
+      kv([
+        ['approvers', approvers.length ? approvers.join(', ') : c.yellow('anyone in the channel')],
+        ['interactivity URL', c.cyan(res.interactionsUrl)],
+      ]);
+      out('');
+      info('Set that URL as the Request URL under Interactivity in the Slack app, then:');
+      out(`    ${c.cyan('pw slack test')}`);
+      if (!approvers.length) {
+        warn('With no --approver list, anyone who can see the channel can approve. Keep the channel private,');
+        warn('or name the Slack user IDs allowed to decide.');
+      }
+      out('');
+      return 0;
+    }
+    if (action === 'status') {
+      const res = await call('GET', '');
+      heading('Slack approvals');
+      if (!res.configured) {
+        kv([['status', c.grey('not connected')]]);
+        out('');
+        info(`connect with ${c.cyan('pw slack connect')} — see docs/SLACK.md`);
+        out('');
+        return 0;
+      }
+      kv([
+        ['status', c.green('connected')],
+        ['webhook', res.webhookHost],
+        ['approvers', res.approvers.length ? res.approvers.join(', ') : c.yellow('anyone in the channel')],
+        ['interactivity URL', res.interactionsUrl],
+        ['updated', res.updatedAt],
+      ]);
+      out('');
+      return 0;
+    }
+    if (action === 'test') {
+      await call('POST', '/test', {});
+      ok('Sent a test message. It should be in the channel now.');
+      return 0;
+    }
+    if (action === 'disconnect') {
+      const res = await call('DELETE', '');
+      ok(res.removed ? 'Slack disconnected. Approvals stay in the console.' : 'Slack was not connected.');
+      return 0;
+    }
+    bad(`unknown action "${action}": try connect, status, test or disconnect`);
+    return 2;
+  } catch (err) {
+    bad(`Slack: ${/** @type {Error} */ (err).message}`);
+    return 1;
+  }
+}

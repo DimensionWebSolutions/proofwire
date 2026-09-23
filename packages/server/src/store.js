@@ -647,6 +647,42 @@ export class Store {
     return { kid: args.kid, public_key: args.publicKey, bound_at: boundAt, bound_by: args.by };
   }
 
+  // ── integrations ──────────────────────────────────────────────────────
+
+  /**
+   * @param {string} orgId
+   * @param {string} kind
+   * @returns {{ config: any, createdAt: string, updatedAt: string } | null}
+   */
+  integration(orgId, kind) {
+    const row = this.db.prepare('SELECT * FROM integrations WHERE org_id = ? AND kind = ?').get(orgId, kind);
+    return row ? { config: JSON.parse(row.config), createdAt: row.created_at, updatedAt: row.updated_at } : null;
+  }
+
+  /**
+   * @param {string} orgId
+   * @param {string} kind
+   * @param {object} config
+   */
+  setIntegration(orgId, kind, config) {
+    const at = now();
+    this.db
+      .prepare(
+        `INSERT INTO integrations(org_id, kind, config, created_at, updated_at) VALUES(?, ?, ?, ?, ?)
+         ON CONFLICT(org_id, kind) DO UPDATE SET config = excluded.config, updated_at = excluded.updated_at`,
+      )
+      .run(orgId, kind, JSON.stringify(config), at, at);
+  }
+
+  /**
+   * @param {string} orgId
+   * @param {string} kind
+   * @returns {boolean} Whether there was one to remove.
+   */
+  deleteIntegration(orgId, kind) {
+    return this.db.prepare('DELETE FROM integrations WHERE org_id = ? AND kind = ?').run(orgId, kind).changes > 0;
+  }
+
   // ── self-audit ────────────────────────────────────────────────────────
 
   /**

@@ -22,6 +22,7 @@ import { StoreError } from './store.js';
  * @property {Record<string,string>} params
  * @property {URLSearchParams} query
  * @property {any} body
+ * @property {string|null} rawBody  A form body exactly as received; null otherwise.
  * @property {import('./auth.js').Principal|null} principal
  * @property {string} requestId
  * @property {import('./store.js').Store} store
@@ -222,17 +223,21 @@ export function readJson(req, maxBytes) {
  * urlencoded`; the API sends JSON. Handling both here keeps every route
  * handler reading from one `ctx.body` regardless of who called it.
  *
+ * A form body also comes back as the exact text received, for the one kind of
+ * caller that needs it: a signature (Slack's) computed over the raw bytes.
+ * Re-serialising the parsed fields would not reproduce them.
+ *
  * @param {Req} req
  * @param {number} maxBytes
- * @returns {Promise<any>}
+ * @returns {Promise<{ body: any, raw: string | null }>}
  */
 export async function readBody(req, maxBytes) {
   const type = String(req.headers['content-type'] ?? '');
   if (type.includes('application/x-www-form-urlencoded')) {
     const text = await readText(req, maxBytes);
-    return Object.fromEntries(new URLSearchParams(text));
+    return { body: Object.fromEntries(new URLSearchParams(text)), raw: text };
   }
-  return readJson(req, maxBytes);
+  return { body: await readJson(req, maxBytes), raw: null };
 }
 
 /**

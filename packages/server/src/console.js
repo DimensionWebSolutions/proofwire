@@ -714,7 +714,41 @@ function settings(hub, ctx) {
     hand an outside firm. Invite one with <span class="mono">POST /v1/invites</span>; the link is
     returned once and never stored.</p>
 
+  ${slackPanel(hub, ctx)}
+
   ${identity}`;
+}
+
+/**
+ * Whether escalations go to Slack, and who may decide them there. Shows that
+ * credentials are set, never what they are.
+ *
+ * @param {import('./app.js').Hub} hub
+ * @param {import('./http.js').Ctx} ctx
+ */
+function slackPanel(hub, ctx) {
+  const slack = hub.store.integration(ctx.principal.orgId, 'slack');
+  if (!slack) {
+    return `<h2>Slack approvals</h2>
+    <div class="panel" style="padding:16px;font-size:13px">
+      <span class="pill pending">not connected</span>
+      <p style="margin:10px 0 0;color:var(--ink-2)">Escalations wait here in <a href="/approvals">Approvals</a>.
+      To get them in a Slack channel with Approve and Deny buttons, run
+      <span class="mono">pw slack connect</span> with an admin key. See <span class="mono">docs/SLACK.md</span>.</p>
+    </div>`;
+  }
+  const approvers = slack.config.approvers ?? [];
+  return `<h2>Slack approvals</h2>
+    <div class="panel" style="padding:16px">
+      <dl class="kv">
+        <dt>status</dt><dd><span class="pill allow">connected</span></dd>
+        <dt>webhook</dt><dd class="mono">${esc(new URL(slack.config.webhookUrl).host)}</dd>
+        <dt>approvers</dt><dd>${approvers.length
+          ? approvers.map((a) => `<span class="mono">${esc(a)}</span>`).join(', ')
+          : '<span style="color:var(--hold)">anyone in the channel</span>'}</dd>
+        <dt>since</dt><dd class="dim">${esc(ago(slack.updatedAt))}</dd>
+      </dl>
+    </div>`;
 }
 
 export { esc, page, layout };

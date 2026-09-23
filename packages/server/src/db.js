@@ -353,6 +353,22 @@ const MIGRATIONS = [
       );
     `,
   },
+  {
+    id: '008_integrations',
+    sql: `
+      -- Per-organisation connections to other services (Slack approvals, for
+      -- now). The config holds credentials: treat this table like the keys
+      -- table, and a backup of it like a backup of them.
+      CREATE TABLE integrations (
+        org_id     TEXT NOT NULL REFERENCES orgs(id),
+        kind       TEXT NOT NULL,
+        config     TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (org_id, kind)
+      );
+    `,
+  },
 ];
 
 /**

@@ -28,6 +28,14 @@ import {
   errorResponse,
 } from './http.js';
 import { renderConsole } from './console.js';
+import {
+  SLACK_HOSTS,
+  verifySlackSignature,
+  slackUrlProblem,
+  approvalMessage,
+  decidedMessage,
+  slackActor,
+} from './slack.js';
 
 /**
  * The Proofwire hub.
@@ -64,6 +72,8 @@ export const DEFAULT_CONFIG = {
   publicUrl: '',
   /** Serve only `WITNESS_ONLY_ROUTES`. For a node whose one job is co-signing. */
   witnessOnly: false,
+  /** Hosts a Slack webhook or response URL may be on. Tests point this at a fake. */
+  slackHosts: SLACK_HOSTS,
 };
 
 /**
@@ -811,6 +821,17 @@ export class Hub {
           String(b.session ?? ''), now(), expiresAt,
         );
 
+      this._notifySlack(ctx, {
+        id,
+        target: String(b.target),
+        log: log.slug,
+        params: b.params ?? {},
+        reason: String(b.reason ?? ''),
+        rules: Array.isArray(b.rules) ? b.rules.map(String) : [],
+        principal: String(b.principal ?? ''),
+        agent: String(b.agent ?? ''),
+        expiresAt,
+      });
       return { id, status: 'pending', expiresAt };
     });
 
@@ -855,36 +876,166 @@ export class Hub {
 
     r.post('/v1/approvals/:id/decide', (ctx) => {
       requireScope(ctx.principal, 'approvals:write');
-      const approved = ctx.body?.approved === true;
-      const note = String(ctx.body?.note ?? '');
-
-      const row = this.db
-        .prepare('SELECT * FROM approvals WHERE org_id = ? AND id = ?')
-        .get(ctx.principal.orgId, ctx.params.id);
-      if (!row) throw new StoreError(404, 'no_such_approval', 'no such approval request');
-      if (row.status !== 'pending') {
-        throw new StoreError(409, 'already_decided', `this request was already ${row.status}`);
+      const res = this._decideApproval(ctx.principal.orgId, ctx.params.id, {
+        approved: ctx.body?.approved === true,
+        by: ctx.principal.label,
+        byKind: ctx.principal.kind,
+        note: String(ctx.body?.note ?? ''),
+        via: 'api',
+      });
+      if (res.outcome === 'missing') throw new StoreError(404, 'no_such_approval', 'no such approval request');
+      if (res.outcome === 'already') {
+        throw new StoreError(409, 'already_decided', `this request was already ${res.row.status}`);
       }
-      if (row.expires_at <= now()) {
+      if (res.outcome === 'expired') {
         throw new StoreError(410, 'expired', 'this request expired before it was decided');
       }
+      return { id: res.row.id, status: res.status, decidedBy: ctx.principal.label };
+    });
 
-      const status = approved ? 'approved' : 'denied';
-      this.db
-        .prepare('UPDATE approvals SET status = ?, decided_at = ?, decided_by = ?, note = ? WHERE id = ?')
-        .run(status, now(), ctx.principal.label, note, row.id);
+    // ── integrations: Slack approvals ───────────────────────────────────
+    r.get('/v1/integrations/slack', (ctx) => {
+      requireScope(ctx.principal, 'admin');
+      const found = this.store.integration(ctx.principal.orgId, 'slack');
+      if (!found) return { configured: false };
+      // The webhook URL and signing secret are credentials: report that they
+      // are set, never what they are.
+      return {
+        configured: true,
+        webhookHost: new URL(found.config.webhookUrl).host,
+        approvers: found.config.approvers,
+        interactionsUrl: `${this._publicUrl(ctx)}/v1/integrations/slack/interactions`,
+        updatedAt: found.updatedAt,
+      };
+    });
 
+    r.put('/v1/integrations/slack', (ctx) => {
+      requireScope(ctx.principal, 'admin');
+      const b = ctx.body ?? {};
+      const problem = slackUrlProblem(String(b.webhookUrl ?? ''), this.config.slackHosts);
+      if (problem) throw new StoreError(400, 'bad_webhook_url', `webhookUrl ${problem}`);
+      // Slack signing secrets are 32 lowercase hex characters.
+      if (!/^[0-9a-f]{32}$/.test(String(b.signingSecret ?? ''))) {
+        throw new StoreError(400, 'bad_signing_secret', 'signingSecret must be the 32-character hex secret from the Slack app');
+      }
+      const approvers = Array.isArray(b.approvers) ? b.approvers.map(String) : [];
+      const badApprover = approvers.find((id) => !/^[UW][A-Z0-9]{2,20}$/.test(id));
+      if (badApprover !== undefined) {
+        throw new StoreError(400, 'bad_approver', `"${badApprover}" is not a Slack user ID (like U024BE7LH)`);
+      }
+
+      this.store.setIntegration(ctx.principal.orgId, 'slack', {
+        webhookUrl: String(b.webhookUrl),
+        signingSecret: String(b.signingSecret),
+        approvers,
+      });
       this.store.recordEvent({
         orgId: ctx.principal.orgId,
         actor: ctx.principal.label,
         actorKind: ctx.principal.kind,
-        action: `approval.${status}`,
-        subject: row.target,
-        meta: { approval: row.id, note },
+        action: 'integration.slack.set',
+        subject: 'slack',
+        meta: { webhookHost: new URL(String(b.webhookUrl)).host, approvers },
       });
+      return {
+        configured: true,
+        approvers,
+        interactionsUrl: `${this._publicUrl(ctx)}/v1/integrations/slack/interactions`,
+      };
+    });
 
-      this.approvalBus.emit(row.id);
-      return { id: row.id, status, decidedBy: ctx.principal.label };
+    r.delete('/v1/integrations/slack', (ctx) => {
+      requireScope(ctx.principal, 'admin');
+      const removed = this.store.deleteIntegration(ctx.principal.orgId, 'slack');
+      if (removed) {
+        this.store.recordEvent({
+          orgId: ctx.principal.orgId,
+          actor: ctx.principal.label,
+          actorKind: ctx.principal.kind,
+          action: 'integration.slack.removed',
+          subject: 'slack',
+        });
+      }
+      return { configured: false, removed };
+    });
+
+    /** A plain message, so an admin can see the webhook works before relying on it. */
+    r.post('/v1/integrations/slack/test', async (ctx) => {
+      requireScope(ctx.principal, 'admin');
+      const found = this.store.integration(ctx.principal.orgId, 'slack');
+      if (!found) throw new StoreError(404, 'not_configured', 'Slack is not connected for this organization');
+      const res = await this._postToSlack(found.config.webhookUrl, {
+        text: `Proofwire is connected. Escalated agent actions for this organization will appear here, with Approve and Deny buttons.`,
+      });
+      if (!res.ok) throw new StoreError(502, 'slack_error', `Slack answered: ${res.error}`);
+      return { sent: true };
+    });
+
+    /**
+     * Button clicks, from Slack. No API key: Slack proves it sent the request
+     * by signing the raw body with the app's signing secret, and a request
+     * that doesn't verify changes nothing.
+     */
+    r.post('/v1/integrations/slack/interactions', async (ctx) => {
+      let payload;
+      try {
+        payload = JSON.parse(String(ctx.body?.payload ?? ''));
+      } catch {
+        throw new StoreError(400, 'bad_payload', 'expected a Slack interaction payload');
+      }
+      const action = Array.isArray(payload?.actions) ? payload.actions[0] : null;
+      const approvalId = typeof action?.value === 'string' ? action.value : '';
+      const row = approvalId ? this.db.prepare('SELECT * FROM approvals WHERE id = ?').get(approvalId) : null;
+      const slack = row ? this.store.integration(row.org_id, 'slack') : null;
+
+      // One answer for "no such approval", "no Slack for that org" and "bad
+      // signature", so an unsigned request learns nothing about which ids exist.
+      const verified =
+        slack &&
+        verifySlackSignature({
+          signingSecret: slack.config.signingSecret,
+          timestamp: ctx.req.headers['x-slack-request-timestamp'],
+          signature: ctx.req.headers['x-slack-signature'],
+          rawBody: ctx.rawBody ?? '',
+        });
+      if (!verified) throw new StoreError(401, 'bad_signature', 'request signature did not verify');
+
+      const by = slackActor(payload.user);
+      const respond = (/** @type {object} */ message) => {
+        const url = String(payload.response_url ?? '');
+        if (slackUrlProblem(url, this.config.slackHosts)) return;
+        this._postToSlack(url, message).catch(() => {});
+      };
+
+      const approvers = slack.config.approvers ?? [];
+      if (approvers.length && !approvers.includes(String(payload.user?.id))) {
+        this.store.recordEvent({
+          orgId: row.org_id,
+          actor: by,
+          actorKind: 'slack',
+          action: 'approval.refused',
+          subject: row.target,
+          meta: { approval: row.id, reason: 'not an approver' },
+        });
+        respond({
+          response_type: 'ephemeral',
+          replace_original: false,
+          text: 'You are not on the list of people who can decide Proofwire approvals for this workspace.',
+        });
+        return {};
+      }
+
+      const res = this._decideApproval(row.org_id, row.id, {
+        approved: action.action_id === 'proofwire_approve',
+        by,
+        byKind: 'slack',
+        note: action.action_id === 'proofwire_approve' ? 'approved in Slack' : 'denied in Slack',
+        via: 'slack',
+      });
+      if (res.outcome === 'decided') respond(decidedMessage(row, res.status, by));
+      else if (res.outcome === 'already') respond(decidedMessage(row, res.row.status, res.row.decided_by, true));
+      else if (res.outcome === 'expired') respond(decidedMessage(row, 'expired', ''));
+      return {};
     });
 
     // ── admin ───────────────────────────────────────────────────────────
@@ -1169,28 +1320,14 @@ export class Hub {
 
     r.post('/approvals/:id/decide', (ctx) => {
       requireScope(ctx.principal, 'approvals:write');
-      const approved = String(ctx.body?.approved ?? '') === '1';
-      const row = this.db
-        .prepare('SELECT * FROM approvals WHERE org_id = ? AND id = ?')
-        .get(ctx.principal.orgId, ctx.params.id);
-      if (!row) throw new StoreError(404, 'no_such_approval', 'no such approval request');
-      if (row.status !== 'pending' || row.expires_at <= now()) {
-        return { __redirect: '/approvals' };
-      }
-
-      const status = approved ? 'approved' : 'denied';
-      this.db
-        .prepare('UPDATE approvals SET status = ?, decided_at = ?, decided_by = ?, note = ? WHERE id = ?')
-        .run(status, now(), ctx.principal.label, '', row.id);
-      this.store.recordEvent({
-        orgId: ctx.principal.orgId,
-        actor: ctx.principal.label,
-        actorKind: ctx.principal.kind,
-        action: `approval.${status}`,
-        subject: row.target,
-        meta: { approval: row.id, via: 'console' },
+      const res = this._decideApproval(ctx.principal.orgId, ctx.params.id, {
+        approved: String(ctx.body?.approved ?? '') === '1',
+        by: ctx.principal.label,
+        byKind: ctx.principal.kind,
+        note: '',
+        via: 'console',
       });
-      this.approvalBus.emit(row.id);
+      if (res.outcome === 'missing') throw new StoreError(404, 'no_such_approval', 'no such approval request');
       return { __redirect: '/approvals' };
     });
 
@@ -1207,6 +1344,94 @@ export class Hub {
       });
       return { __redirect: '/settings' };
     });
+  }
+
+  /**
+   * Decide a pending approval: the one path the API, the console and Slack
+   * all take, so they can't drift apart in what they check or record.
+   *
+   * The update itself is conditional on the request still being pending and
+   * unexpired, so two people clicking at once can't both decide it: exactly
+   * one update lands, and the other caller is told who got there first.
+   *
+   * @param {string} orgId
+   * @param {string} id
+   * @param {{ approved: boolean, by: string, byKind: string, note: string, via: string }} d
+   * @returns {{ outcome: 'decided' | 'already' | 'expired' | 'missing', status?: string, row?: any }}
+   */
+  _decideApproval(orgId, id, d) {
+    const read = () => this.db.prepare('SELECT * FROM approvals WHERE org_id = ? AND id = ?').get(orgId, id);
+    const row = read();
+    if (!row) return { outcome: 'missing' };
+
+    const status = d.approved ? 'approved' : 'denied';
+    const at = now();
+    const changed = this.db
+      .prepare(
+        `UPDATE approvals SET status = ?, decided_at = ?, decided_by = ?, note = ?
+         WHERE id = ? AND status = 'pending' AND expires_at > ?`,
+      )
+      .run(status, at, d.by, d.note, id, at).changes;
+
+    if (!changed) {
+      const current = read();
+      return current.status === 'pending' ? { outcome: 'expired', row: current } : { outcome: 'already', row: current };
+    }
+
+    this.store.recordEvent({
+      orgId,
+      actor: d.by,
+      actorKind: d.byKind,
+      action: `approval.${status}`,
+      subject: row.target,
+      meta: { approval: id, note: d.note, via: d.via },
+    });
+    this.approvalBus.emit(id);
+    return { outcome: 'decided', status, row: read() };
+  }
+
+  /**
+   * Post a new approval request to the organisation's Slack channel, if it
+   * has one. Never awaited by the request that created the approval: an agent
+   * escalating must not wait on, or fail because of, Slack.
+   *
+   * @param {import('./http.js').Ctx} ctx
+   * @param {Parameters<typeof approvalMessage>[0]} approval
+   */
+  _notifySlack(ctx, approval) {
+    const slack = this.store.integration(ctx.principal.orgId, 'slack');
+    if (!slack) return;
+    const message = approvalMessage(approval, `${this._publicUrl(ctx)}/approvals`);
+    this._postToSlack(slack.config.webhookUrl, message).then((res) => {
+      if (!res.ok) {
+        console.error(
+          JSON.stringify({ level: 'warn', event: 'slack.notify_failed', approval: approval.id, error: res.error }),
+        );
+      }
+    });
+  }
+
+  /**
+   * @param {string} url  Already checked against `slackHosts`.
+   * @param {object} message
+   * @returns {Promise<{ ok: boolean, error?: string }>}
+   */
+  async _postToSlack(url, message) {
+    if (slackUrlProblem(url, this.config.slackHosts)) return { ok: false, error: 'URL not allowed' };
+    try {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(message),
+        // A webhook URL is never a place to follow a redirect to.
+        redirect: 'error',
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) return { ok: true };
+      return { ok: false, error: `HTTP ${res.status} ${(await res.text()).slice(0, 100)}` };
+    } catch (err) {
+      return { ok: false, error: /** @type {Error} */ (err).message };
+    }
   }
 
   /**
@@ -1428,10 +1653,10 @@ export class Hub {
         );
       }
 
-      const body =
+      const { body, raw } =
         req.method === 'POST' || req.method === 'PUT' || req.method === 'PATCH'
           ? await readBody(req, this.config.maxBodyBytes)
-          : null;
+          : { body: null, raw: null };
 
       /** @type {import('./http.js').Ctx} */
       const ctx = {
@@ -1439,6 +1664,7 @@ export class Hub {
         params: matched.params,
         query: url.searchParams,
         body,
+        rawBody: raw,
         principal,
         requestId,
         store: this.store,

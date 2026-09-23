@@ -10,7 +10,7 @@ import { approverFrom } from '@proof_wire/proxy/approve';
 import { c, out, err, ok, bad, warn, info, heading, kv, table, outcomeBadge, parseArgs } from './ui.js';
 import { witnessKeysFrom } from './witness-keys.js';
 import {
-  cmdRemote, cmdPush, cmdRemoteVerify, cmdPolicy, cmdCosign, loadRemotes, resolveRemote,
+  cmdRemote, cmdPush, cmdRemoteVerify, cmdPolicy, cmdCosign, cmdSlack, loadRemotes, resolveRemote,
 } from './remote-cmds.js';
 
 // Read from the package, not written here: a version typed into source is one
@@ -754,6 +754,7 @@ function cmdHelp() {
   out(`    ${c.cyan('pw remote-verify <log>')}         verify a hosted log from outside`);
   out(`    ${c.cyan('pw policy push|pull|list')}       manage the org's shared policy`);
   out(`    ${c.cyan('pw cosign')}                      have the hub's witness counter-sign`);
+  out(`    ${c.cyan('pw slack connect|status|test')}   approve escalations from Slack (admin key)`);
   out('');
   out(`  ${c.bold('Govern')}`);
   out(`    ${c.cyan('pw keys')}                        public keys to publish for verifiers`);
@@ -774,6 +775,7 @@ const COMMANDS = {
   // `test` replays the local log and needs no hub; the rest talk to one.
   policy: (/** @type {any} */ args) => (args._[1] === 'test' ? cmdPolicyTest(args, loadConfig(args)) : cmdPolicy(args)),
   cosign: cmdCosign,
+  slack: cmdSlack,
   proxy: cmdProxy,
   verify: cmdVerify,
   audit: cmdVerify,

@@ -470,6 +470,12 @@ GET    /v1/approvals                     the inbox  [?status]
 GET    /v1/approvals/:id?wait=30         long-poll for a decision
 POST   /v1/approvals/:id/decide          { approved, note }
 
+GET    /v1/integrations/slack            connected? approvers?  (admin)
+PUT    /v1/integrations/slack            { webhookUrl, signingSecret, approvers }  (admin)
+DELETE /v1/integrations/slack            (admin)
+POST   /v1/integrations/slack/test       post a test message  (admin)
+POST   /v1/integrations/slack/interactions   Slack's button clicks, signed by Slack
+
 GET    /v1/keys · POST /v1/keys · DELETE /v1/keys/:id
 GET    /v1/members · POST /v1/members
 GET    /v1/events                        the hub's own hash-chained audit trail
@@ -532,6 +538,9 @@ confidence rather than evidence.
    from the log alone.
 5. **No SSO yet.** Sessions are email plus password, with invitations and
    resets. SAML/OIDC is planned.
+6. **Slack approvals** ([`SLACK.md`](SLACK.md)) post to one channel per
+   organisation, and a request decided in the console keeps its buttons in
+   Slack (a click then says who already decided).
 6. **`node:sqlite` is still marked experimental** upstream. It is stable in
    practice and the API surface used here is small, but it is worth knowing.
 7. **A witness trusts the first key it sees for a log name.** It binds the log

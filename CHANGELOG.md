@@ -56,6 +56,21 @@ release together at the same version.
 
 ### Added
 
+- **Slack approvals** ([`docs/SLACK.md`](docs/SLACK.md)). An escalation is
+  posted to the organisation's Slack channel with Approve and Deny buttons; a
+  click decides it as the console would, and the receipt records who, as
+  `slack:<user id> (<name>)`. Every click is verified with Slack's request
+  signature over the raw body, within a five-minute replay window, against the
+  organisation's own signing secret. Webhook and response URLs are limited to
+  `hooks.slack.com`. An optional approver list restricts who may decide;
+  refusals are audited. Nothing in the agent's arguments can mention the
+  channel, and the arguments shown are the already-redacted preview. Set up
+  with `pw slack connect|status|test|disconnect` (admin key; credentials from
+  the environment), and shown on the console's Settings page. The API is
+  `/v1/integrations/slack`. Slack being down never delays an escalation.
+- **Deciding an approval is atomic.** The API, the console and Slack share one
+  path whose update applies only while the request is still pending and
+  unexpired, so two simultaneous decisions can't both land.
 - **A production deployment kit, `deploy/`, with a runbook,
   [`docs/DEPLOY.md`](docs/DEPLOY.md).** Takes one Linux server and a domain to
   a Proofwire node on HTTPS: Caddy in front (automatic Let's Encrypt
