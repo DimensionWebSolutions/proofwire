@@ -56,6 +56,18 @@ release together at the same version.
 
 ### Added
 
+- **Single sign-on with OpenID Connect** ([`docs/SSO.md`](docs/SSO.md)), for Okta,
+  Microsoft Entra ID, Google Workspace or any OIDC provider. Authorization code
+  flow with PKCE and a browser-bound, single-use state; ID tokens verified in
+  full (asymmetric algorithms only; `none` and HMAC refused; issuer, audience,
+  authorised party, expiry, nonce), with key rotation followed. Accounts are
+  bound to the provider's subject, not only the email. Optional email-domain
+  allowlist, just-in-time provisioning (never as owner), and `requireSso`,
+  which makes an organisation reachable only by its own SSO sessions (API keys
+  unaffected). Requests to the provider refuse private addresses at connect
+  time, after DNS, and follow no redirects. SSO sessions last a day. Configured
+  with `/v1/integrations/oidc`; "Continue with SSO" on the sign-in page; shown
+  on Settings; every sign-in, refusal and provisioning audited.
 - **Retention for hub copies of receipts** (HUB.md, *Retention*). An
   organisation's admins set a period (`PUT /v1/settings/retention`), and an
   operator can cap it per plan (`proofwire-hub retention <org> --cap N`); the

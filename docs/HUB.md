@@ -99,7 +99,9 @@ edit is one more thing to get wrong in a container.
 | `PROOFWIRE_BACKUP_HOURS` | `6` | |
 | `PROOFWIRE_BACKUP_KEEP` | `14` | Snapshots retained before pruning. |
 | `PROOFWIRE_NOTIFY_URL` | unset | Webhook for invitation and reset links. |
-| `PROOFWIRE_PUBLIC_URL` | unset | Base URL for those links. Set it behind a proxy. |
+| `PROOFWIRE_PUBLIC_URL` | unset | Base URL for those links, and for SSO's redirect URI. Set it behind a proxy. |
+| `PROOFWIRE_OIDC_ALLOW_PRIVATE` | `0` | `1` lets an SSO provider live on a private address. Only for a self-hosted hub whose provider is on its own network. |
+| `PROOFWIRE_RETENTION_SWEEP_MINUTES` | `60` | How often retention runs. `0` disables it. |
 
 ### On `PROOFWIRE_TRUST_PROXY`
 
@@ -527,6 +529,10 @@ GET    /v1/members · POST /v1/members
 GET    /v1/events                        the hub's own hash-chained audit trail
 GET    /v1/usage
 GET    /v1/settings/retention            period, plan cap, pruned so far  (admin)
+GET    /v1/integrations/oidc             SSO settings, never the secret  (admin)
+PUT    /v1/integrations/oidc             { issuer, clientId, clientSecret, domains, autoProvision, requireSso }  (admin)
+DELETE /v1/integrations/oidc             (admin)
+GET    /sso/:org · /sso/callback         the browser sign-in flow
 PUT    /v1/settings/retention            { days | null }  (admin; not above the cap)
 ```
 
@@ -584,8 +590,8 @@ confidence rather than evidence.
 4. **Timestamps come from the signing host.** A backdated entry is flagged when
    it contradicts its neighbours; a uniformly wrong clock is not detectable
    from the log alone.
-5. **No SSO yet.** Sessions are email plus password, with invitations and
-   resets. SAML/OIDC is planned.
+5. **SSO is OpenID Connect only** ([`SSO.md`](SSO.md)), one provider per
+   organisation, with no SCIM. SAML is not supported.
 6. **Slack approvals** ([`SLACK.md`](SLACK.md)) post to one channel per
    organisation, and a request decided in the console keeps its buttons in
    Slack (a click then says who already decided).

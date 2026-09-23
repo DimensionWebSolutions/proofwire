@@ -387,6 +387,37 @@ const MIGRATIONS = [
       CREATE INDEX idx_receipts_unpruned ON receipts(org_id, ts) WHERE pruned_at IS NULL;
     `,
   },
+  {
+    id: '010_sso',
+    sql: `
+      -- An OpenID Connect sign-in in progress: single use, ten minutes, and
+      -- bound to the browser that started it by a cookie holding the id.
+      CREATE TABLE sso_states (
+        id          TEXT PRIMARY KEY,
+        org_id      TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        nonce       TEXT NOT NULL,
+        verifier    TEXT NOT NULL,
+        created_at  TEXT NOT NULL
+      );
+
+      -- Which identity-provider account is which user. Bound to the
+      -- provider's stable subject, not to an email address, so an address the
+      -- provider later reassigns can't sign in as the person who had it.
+      CREATE TABLE sso_identities (
+        org_id        TEXT NOT NULL REFERENCES orgs(id) ON DELETE CASCADE,
+        issuer        TEXT NOT NULL,
+        subject       TEXT NOT NULL,
+        user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        created_at    TEXT NOT NULL,
+        last_login_at TEXT,
+        PRIMARY KEY (org_id, issuer, subject)
+      );
+
+      -- How a session was started: 'password', or 'sso:<org id>'. An
+      -- organisation that requires SSO accepts only its own.
+      ALTER TABLE sessions ADD COLUMN via TEXT NOT NULL DEFAULT 'password';
+    `,
+  },
 ];
 
 /**

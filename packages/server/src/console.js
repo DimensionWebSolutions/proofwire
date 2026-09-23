@@ -211,6 +211,8 @@ export function renderConsole(hub, ctx, route) {
 function loginPage(hub, ctx) {
   const failed = ctx.query.get('e') === '1';
   const throttled = ctx.query.get('e') === '2';
+  const ssoFailed = ctx.query.get('e') === 'sso';
+  const ssoDenied = ctx.query.get('e') === 'sso_denied';
   return page(
     layout({
       title: 'Sign in',
@@ -230,6 +232,15 @@ function loginPage(hub, ctx) {
           <button class="go" type="submit" style="width:100%;padding:10px">Sign in</button>
         </form>
         <p style="margin-top:16px;font-size:13px"><a href="/forgot">Forgotten your password?</a></p>
+
+        <h2 style="margin-top:28px">Single sign-on</h2>
+        ${ssoFailed ? '<div class="banner bad">Single sign-on didn\'t complete. Try again, or ask your administrator whether SSO is set up.</div>' : ''}
+        ${ssoDenied ? '<div class="banner bad">Your identity provider signed you in, but this account can\'t use this organization. Ask an administrator to invite you.</div>' : ''}
+        <form method="get" action="/sso">
+          <div class="field"><label for="org">Organization</label>
+            <input id="org" name="org" autocomplete="organization" placeholder="acme" required></div>
+          <button type="submit" style="width:100%;padding:10px">Continue with SSO</button>
+        </form>
         </div>`,
     }),
   );
@@ -718,7 +729,36 @@ function settings(hub, ctx) {
 
   ${retentionPanel(hub, ctx)}
 
+  ${ssoPanel(hub, ctx)}
+
   ${identity}`;
+}
+
+/**
+ * @param {import('./app.js').Hub} hub
+ * @param {import('./http.js').Ctx} ctx
+ */
+function ssoPanel(hub, ctx) {
+  const sso = hub.store.integration(ctx.principal.orgId, 'oidc');
+  if (!sso) {
+    return `<h2>Single sign-on</h2>
+    <div class="panel" style="padding:16px;font-size:13px">
+      <span class="pill pending">not configured</span>
+      <p style="margin:10px 0 0;color:var(--ink-2)">Sign in through Okta, Microsoft Entra ID, Google Workspace or any
+      OpenID Connect provider. Set it up with <span class="mono">PUT /v1/integrations/oidc</span>; see
+      <span class="mono">docs/SSO.md</span>.</p>
+    </div>`;
+  }
+  const c = sso.config;
+  return `<h2>Single sign-on</h2>
+    <div class="panel" style="padding:16px">
+      <dl class="kv">
+        <dt>status</dt><dd><span class="pill allow">configured</span>${c.requireSso ? ' <span class="pill escalate">required</span>' : ''}</dd>
+        <dt>provider</dt><dd class="mono">${esc(c.issuer)}</dd>
+        <dt>domains</dt><dd>${c.domains.length ? c.domains.map((d) => `<span class="mono">${esc(d)}</span>`).join(', ') : '<span class="dim">any</span>'}</dd>
+        <dt>new people</dt><dd>${c.autoProvision ? `join as <span class="mono">${esc(c.autoProvision)}</span>` : 'must be invited first'}</dd>
+      </dl>
+    </div>`;
 }
 
 /**

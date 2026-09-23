@@ -425,6 +425,7 @@ not broken.
 **Guides:** [trying it on real agents](docs/PARTNERS.md) ·
 [deploying a hub or witness](docs/DEPLOY.md) ·
 [Slack approvals](docs/SLACK.md) ·
+[single sign-on](docs/SSO.md) ·
 [evidence packs for auditors](docs/EVIDENCE.md) ·
 [the hub](docs/HUB.md) ·
 [threat model](docs/THREAT-MODEL.md)

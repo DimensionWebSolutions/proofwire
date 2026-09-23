@@ -217,15 +217,15 @@ export class Auth {
    * @param {number} [days]
    * @returns {{ token: string, expiresAt: string }}
    */
-  createSession(userId, days = 14) {
+  createSession(userId, days = 14, via = 'password') {
     const token = randomBytes(32).toString('base64url');
     const expiresAt = new Date(Date.now() + days * 86_400_000).toISOString();
     this.db
       .prepare(
-        `INSERT INTO sessions(id, user_id, token_hash, created_at, expires_at)
-         VALUES(?, ?, ?, ?, ?)`,
+        `INSERT INTO sessions(id, user_id, token_hash, created_at, expires_at, via)
+         VALUES(?, ?, ?, ?, ?, ?)`,
       )
-      .run(newId('session'), userId, hashSecret(token), now(), expiresAt);
+      .run(newId('session'), userId, hashSecret(token), now(), expiresAt, via);
     return { token, expiresAt };
   }
 
@@ -244,7 +244,7 @@ export class Auth {
       .get(hashSecret(token));
     if (!row) return null;
     if (row.expires_at <= now()) return null;
-    return { id: row.uid, email: row.email, name: row.name, sessionId: row.id };
+    return { id: row.uid, email: row.email, name: row.name, sessionId: row.id, via: row.via ?? 'password' };
   }
 
   /** @param {string} token */

@@ -27,7 +27,7 @@ import {
   newRequestId,
   errorResponse,
 } from './http.js';
-import { renderConsole } from './console.js';
+import { renderConsole, esc } from './console.js';
 import {
   SLACK_HOSTS,
   verifySlackSignature,
@@ -36,6 +36,7 @@ import {
   decidedMessage,
   slackActor,
 } from './slack.js';
+import { discover, fetchJson, verifyIdToken, pkce } from './oidc.js';
 
 /**
  * The Proofwire hub.
@@ -74,6 +75,12 @@ export const DEFAULT_CONFIG = {
   witnessOnly: false,
   /** Hosts a Slack webhook or response URL may be on. Tests point this at a fake. */
   slackHosts: SLACK_HOSTS,
+  /**
+   * Let an identity provider live on a private address, over plain HTTP. For
+   * tests, and for a self-hosted hub whose IdP is on the LAN; never on a
+   * hosted hub, where the issuer URL is chosen by a tenant.
+   */
+  oidcAllowPrivate: false,
 };
 
 /**
@@ -129,6 +136,9 @@ export class Hub {
       auth: new RateLimiter(this.config.authRate),
       account: new RateLimiter(this.config.accountLoginRate),
     };
+
+    /** Identity providers' endpoints and keys, by issuer. See `_oidcProvider`. */
+    this._oidcCache = new Map();
 
     /** Wakes long-polling approval waiters the moment a human decides. */
     this.approvalBus = new EventEmitter();
@@ -200,7 +210,13 @@ export class Hub {
     if (!user) return null;
 
     const wanted = url.searchParams.get('org') ?? cookies.get('pw_org') ?? null;
-    const orgs = this.auth.orgsFor(user.id);
+    // An organisation that requires single sign-on is out of reach of any
+    // session not started through its own SSO, whatever else the person can
+    // see. API keys are unaffected: they are machines, not people.
+    const orgs = this.auth.orgsFor(user.id).filter((o) => {
+      const sso = this.store.integration(o.id, 'oidc');
+      return !sso?.config.requireSso || user.via === `sso:${o.id}`;
+    });
     if (orgs.length === 0) return null;
 
     const org = wanted ? orgs.find((o) => o.id === wanted || o.slug === wanted) : orgs[0];
@@ -1292,6 +1308,156 @@ export class Hub {
       };
     });
 
+    // ── single sign-on (OpenID Connect) ─────────────────────────────────
+    r.get('/v1/integrations/oidc', (ctx) => {
+      requireScope(ctx.principal, 'admin');
+      const found = this.store.integration(ctx.principal.orgId, 'oidc');
+      const redirectUri = `${this._publicUrl(ctx)}/sso/callback`;
+      if (!found) return { configured: false, redirectUri };
+      const c = found.config;
+      return {
+        configured: true,
+        issuer: c.issuer,
+        clientId: c.clientId,
+        // Whether a secret is set, never what it is.
+        clientSecret: c.clientSecret ? 'set' : 'none (public client)',
+        domains: c.domains,
+        autoProvision: c.autoProvision,
+        requireSso: c.requireSso,
+        redirectUri,
+        signInUrl: `${this._publicUrl(ctx)}/sso/${this.store.org(ctx.principal.orgId)?.slug}`,
+        updatedAt: found.updatedAt,
+      };
+    });
+
+    r.put('/v1/integrations/oidc', async (ctx) => {
+      requireScope(ctx.principal, 'admin');
+      const b = ctx.body ?? {};
+      const issuer = String(b.issuer ?? '');
+      const clientId = String(b.clientId ?? '');
+      if (!clientId) throw new StoreError(400, 'bad_client_id', 'clientId is required');
+      const domains = Array.isArray(b.domains) ? b.domains.map((d) => String(d).toLowerCase().replace(/^@/, '')) : [];
+      if (domains.some((d) => !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(d))) {
+        throw new StoreError(400, 'bad_domain', 'domains must be email domains like acme.com');
+      }
+      const autoProvision = b.autoProvision == null ? null : String(b.autoProvision);
+      // Signing in must never be the way someone becomes an owner.
+      if (autoProvision !== null && (!ROLES.includes(autoProvision) || autoProvision === 'owner')) {
+        throw new StoreError(400, 'bad_role', `autoProvision must be one of ${ROLES.filter((x) => x !== 'owner').join(', ')}, or null`);
+      }
+      if (autoProvision !== null && domains.length === 0) {
+        throw new StoreError(400, 'domains_required', 'automatic provisioning needs a domain list, or anyone the provider knows could join');
+      }
+      // Proves the issuer is real, reachable, and names itself, before it is
+      // saved; and refuses one on a private address unless this hub allows it.
+      try {
+        await discover(issuer, { allowPrivate: this.config.oidcAllowPrivate });
+      } catch (err) {
+        throw new StoreError(400, 'bad_issuer', `could not use ${issuer || 'that issuer'}: ${/** @type {Error} */ (err).message}`);
+      }
+
+      const config = {
+        issuer,
+        clientId,
+        clientSecret: b.clientSecret ? String(b.clientSecret) : null,
+        domains,
+        autoProvision,
+        requireSso: b.requireSso === true,
+      };
+      this.store.setIntegration(ctx.principal.orgId, 'oidc', config);
+      this._oidcCache.delete(issuer);
+      this.store.recordEvent({
+        orgId: ctx.principal.orgId,
+        actor: ctx.principal.label,
+        actorKind: ctx.principal.kind,
+        action: 'integration.oidc.set',
+        subject: issuer,
+        meta: { clientId, domains, autoProvision, requireSso: config.requireSso },
+      });
+      return {
+        configured: true,
+        redirectUri: `${this._publicUrl(ctx)}/sso/callback`,
+        signInUrl: `${this._publicUrl(ctx)}/sso/${this.store.org(ctx.principal.orgId)?.slug}`,
+        ...(config.requireSso && ctx.principal.kind === 'user' && ctx.principal.user?.via !== `sso:${ctx.principal.orgId}`
+          ? { warning: 'SSO is now required: this session will lose access to the organization. Sign in again through SSO.' }
+          : {}),
+      };
+    });
+
+    r.delete('/v1/integrations/oidc', (ctx) => {
+      requireScope(ctx.principal, 'admin');
+      const removed = this.store.deleteIntegration(ctx.principal.orgId, 'oidc');
+      if (removed) {
+        this.store.recordEvent({
+          orgId: ctx.principal.orgId,
+          actor: ctx.principal.label,
+          actorKind: ctx.principal.kind,
+          action: 'integration.oidc.removed',
+          subject: 'oidc',
+        });
+      }
+      return { configured: false, removed };
+    });
+
+    // The sign-in page's "Sign in with SSO" form lands here.
+    r.get('/sso', (ctx) => {
+      const org = String(ctx.query.get('org') ?? '').trim().toLowerCase();
+      return { __redirect: org ? `/sso/${encodeURIComponent(org)}` : '/login' };
+    });
+
+    // Registered before /sso/:org, which would otherwise match it.
+    r.get('/sso/callback', async (ctx) => this._ssoCallback(ctx));
+
+    r.get('/sso/:org', async (ctx) => {
+      const org = this.store.orgBySlug(ctx.params.org);
+      const sso = org ? this.store.integration(org.id, 'oidc') : null;
+      if (!org || !sso) return { __redirect: '/login?e=sso' };
+
+      let meta;
+      try {
+        ({ meta } = await this._oidcProvider(sso.config));
+      } catch (err) {
+        console.error(JSON.stringify({ level: 'warn', event: 'sso.provider_unreachable', org: org.id, message: /** @type {Error} */ (err).message }));
+        return { __redirect: '/login?e=sso' };
+      }
+
+      // Old, abandoned sign-ins are swept as new ones start.
+      this.db.prepare('DELETE FROM sso_states WHERE created_at < ?').run(new Date(Date.now() - 600_000).toISOString());
+      const state = randomBytes(32).toString('base64url');
+      const nonce = randomBytes(32).toString('base64url');
+      const { verifier, challenge } = pkce();
+      this.db
+        .prepare('INSERT INTO sso_states(id, org_id, nonce, verifier, created_at) VALUES(?, ?, ?, ?, ?)')
+        .run(state, org.id, nonce, verifier, now());
+
+      const auth = new URL(meta.authorization_endpoint);
+      auth.searchParams.set('response_type', 'code');
+      auth.searchParams.set('client_id', sso.config.clientId);
+      auth.searchParams.set('redirect_uri', `${this._publicUrl(ctx)}/sso/callback`);
+      auth.searchParams.set('scope', 'openid email profile');
+      auth.searchParams.set('state', state);
+      auth.searchParams.set('nonce', nonce);
+      auth.searchParams.set('code_challenge', challenge);
+      auth.searchParams.set('code_challenge_method', 'S256');
+
+      // A page, not a redirect: the console's CSP (form-action 'self') would
+      // block a cross-origin redirect at the end of a form submission, which
+      // is how the sign-in form gets here. The cookie ties the callback to
+      // this browser, so someone else's half-finished sign-in can't be
+      // completed in yours.
+      const href = esc(auth.toString());
+      return {
+        __html: `<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="0;url=${href}"><title>Signing in · Proofwire</title></head>
+<body style="font:15px system-ui,sans-serif;margin:40px">
+<p>Taking you to your organization's sign-in page…</p>
+<p><a href="${href}">Continue</a></p></body></html>`,
+        status: 200,
+        headers: { 'set-cookie': cookie('pw_sso', state, { maxAge: 600 }) },
+      };
+    });
+
     // ── console ─────────────────────────────────────────────────────────
     for (const page of [
       '/', '/logs/:log', '/approvals', '/policies', '/settings', '/events',
@@ -1487,6 +1653,164 @@ export class Hub {
     } catch (err) {
       return { ok: false, error: /** @type {Error} */ (err).message };
     }
+  }
+
+  /**
+   * The provider's endpoints and signing keys, cached for an hour. Keys are
+   * re-fetched early when a token names one we don't have: that is what a
+   * provider's key rotation looks like from here.
+   *
+   * @param {{ issuer: string }} config
+   * @param {boolean} [refreshKeys]
+   */
+  async _oidcProvider(config, refreshKeys = false) {
+    const opts = { allowPrivate: this.config.oidcAllowPrivate };
+    const cached = this._oidcCache.get(config.issuer);
+    if (cached && !refreshKeys && Date.now() - cached.at < 3_600_000) return cached;
+    const meta = cached && Date.now() - cached.at < 3_600_000 ? cached.meta : await discover(config.issuer, opts);
+    const { status, json } = await fetchJson(meta.jwks_uri, opts);
+    if (status !== 200 || !Array.isArray(json?.keys)) throw new Error(`the provider's keys (jwks_uri) returned HTTP ${status}`);
+    const entry = { meta, jwks: json, at: Date.now() };
+    this._oidcCache.set(config.issuer, entry);
+    return entry;
+  }
+
+  /**
+   * Finish a sign-in: check the state against this browser, trade the code
+   * for an ID token, verify it, and decide who this is.
+   *
+   * Every refusal goes back to the sign-in page with one of two messages, and
+   * the reason goes to the organisation's audit trail, where its admins can
+   * see it and the person signing in can't probe with it.
+   *
+   * @param {import('./http.js').Ctx} ctx
+   */
+  async _ssoCallback(ctx) {
+    const stateId = String(ctx.query.get('state') ?? '');
+    const bound = parseCookies(ctx.req.headers.cookie).get('pw_sso');
+    const clearState = cookie('pw_sso', '', { maxAge: 0 });
+
+    // Single use: taken out of the table whatever happens next.
+    const state = stateId ? this.db.prepare('SELECT * FROM sso_states WHERE id = ?').get(stateId) : null;
+    if (state) this.db.prepare('DELETE FROM sso_states WHERE id = ?').run(stateId);
+    if (!state || bound !== stateId || Date.parse(state.created_at) < Date.now() - 600_000) {
+      return { __redirect: '/login?e=sso', cookies: [clearState] };
+    }
+
+    const org = this.store.org(state.org_id);
+    const sso = this.store.integration(state.org_id, 'oidc');
+    const refuse = (/** @type {string} */ reason, /** @type {string} */ who = '', denied = false) => {
+      this.store.recordEvent({
+        orgId: state.org_id,
+        actor: who || 'sso',
+        actorKind: 'sso',
+        action: 'auth.sso.refused',
+        subject: who || 'unknown',
+        meta: { reason },
+      });
+      return { __redirect: denied ? '/login?e=sso_denied' : '/login?e=sso', cookies: [clearState] };
+    };
+    if (!org || !sso) return refuse('SSO is no longer configured');
+    if (ctx.query.get('error')) return refuse(`the provider returned ${String(ctx.query.get('error')).slice(0, 60)}`);
+    const code = String(ctx.query.get('code') ?? '');
+    if (!code) return refuse('no authorization code');
+    const c = sso.config;
+
+    let claims;
+    try {
+      let provider = await this._oidcProvider(c);
+      const redirectUri = `${this._publicUrl(ctx)}/sso/callback`;
+      /** @type {Record<string, string>} */
+      const form = { grant_type: 'authorization_code', code, redirect_uri: redirectUri, code_verifier: state.verifier };
+      /** @type {Record<string, string>} */
+      const headers = {};
+      const methods = provider.meta.token_endpoint_auth_methods_supported;
+      if (!c.clientSecret) {
+        form.client_id = c.clientId;
+      } else if (methods && !methods.includes('client_secret_basic') && methods.includes('client_secret_post')) {
+        form.client_id = c.clientId;
+        form.client_secret = c.clientSecret;
+      } else {
+        // RFC 6749 2.3.1: each part form-encoded, then joined and base64'd.
+        const enc = (/** @type {string} */ s) => encodeURIComponent(s).replace(/%20/g, '+');
+        headers.authorization = `Basic ${Buffer.from(`${enc(c.clientId)}:${enc(c.clientSecret)}`).toString('base64')}`;
+      }
+      const token = await fetchJson(provider.meta.token_endpoint, { allowPrivate: this.config.oidcAllowPrivate, form, headers });
+      if (token.status !== 200 || typeof token.json?.id_token !== 'string') {
+        return refuse(`the token endpoint answered HTTP ${token.status}${token.json?.error ? ` (${String(token.json.error).slice(0, 60)})` : ''}`);
+      }
+      const expect = { issuer: c.issuer, clientId: c.clientId, nonce: state.nonce };
+      try {
+        claims = verifyIdToken(token.json.id_token, { ...expect, jwks: provider.jwks });
+      } catch (err) {
+        if (!/no signing key/.test(/** @type {Error} */ (err).message)) throw err;
+        provider = await this._oidcProvider(c, true);
+        claims = verifyIdToken(token.json.id_token, { ...expect, jwks: provider.jwks });
+      }
+    } catch (err) {
+      return refuse(`sign-in could not be verified: ${/** @type {Error} */ (err).message}`);
+    }
+
+    const email = String(claims.email ?? '').trim().toLowerCase();
+    if (!email || !email.includes('@')) return refuse('the provider sent no email address', claims.sub);
+    if (claims.email_verified === false) return refuse('the provider says this email is not verified', email, true);
+    if (c.domains.length && !c.domains.includes(email.split('@')[1])) return refuse('email domain not allowed', email, true);
+
+    // Who is this? The provider's subject first: an email address can be
+    // reassigned, a subject can't.
+    const identity = this.db
+      .prepare('SELECT user_id FROM sso_identities WHERE org_id = ? AND issuer = ? AND subject = ?')
+      .get(org.id, c.issuer, claims.sub);
+    let user = identity ? this.db.prepare('SELECT * FROM users WHERE id = ?').get(identity.user_id) : null;
+    if (!user) {
+      user = this.auth.userByEmail(email);
+      if (user) {
+        const other = this.db
+          .prepare('SELECT subject FROM sso_identities WHERE org_id = ? AND issuer = ? AND user_id = ?')
+          .get(org.id, c.issuer, user.id);
+        if (other) return refuse('this email belongs to a different identity at the provider', email, true);
+      }
+    }
+
+    const member = user && this.auth.orgsFor(user.id).some((o) => o.id === org.id);
+    if (!member) {
+      if (!c.autoProvision) return refuse('not a member of this organization', email, true);
+      if (!user) user = this.auth.createUser({ email, name: String(claims.name ?? '').slice(0, 100) || undefined });
+      this.auth.addMember(org.id, user.id, c.autoProvision);
+      this.store.recordEvent({
+        orgId: org.id,
+        actor: email,
+        actorKind: 'sso',
+        action: 'auth.sso.provisioned',
+        subject: email,
+        meta: { role: c.autoProvision },
+      });
+    }
+    this.db
+      .prepare(
+        `INSERT INTO sso_identities(org_id, issuer, subject, user_id, created_at, last_login_at) VALUES(?, ?, ?, ?, ?, ?)
+         ON CONFLICT(org_id, issuer, subject) DO UPDATE SET last_login_at = excluded.last_login_at`,
+      )
+      .run(org.id, c.issuer, claims.sub, user.id, now(), now());
+
+    const session = this.auth.createSession(user.id, 1, `sso:${org.id}`);
+    this.db.prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').run(now(), user.id);
+    this.store.recordEvent({
+      orgId: org.id,
+      actor: email,
+      actorKind: 'sso',
+      action: 'auth.sso.login',
+      subject: email,
+      meta: { issuer: c.issuer },
+    });
+    return {
+      __redirect: '/',
+      cookies: [
+        clearState,
+        cookie('pw_session', session.token, { maxAge: 86400 }),
+        cookie('pw_org', org.id, { maxAge: 86400 }),
+      ],
+    };
   }
 
   /**
@@ -1692,7 +2016,8 @@ export class Hub {
       // together; a per-key limit alone would let unauthenticated floods past.
       const isIngest = url.pathname.endsWith('/receipts') && req.method === 'POST';
       const isAuth =
-        url.pathname.startsWith('/v1/auth/') || url.pathname === '/login' || url.pathname === '/forgot';
+        url.pathname.startsWith('/v1/auth/') || url.pathname === '/login' || url.pathname === '/forgot' ||
+        url.pathname.startsWith('/sso');
       const limiter = isIngest ? this.limiters.ingest : isAuth ? this.limiters.auth : this.limiters.api;
       const bucketKey = principal
         ? `${principal.kind}:${principal.id}`

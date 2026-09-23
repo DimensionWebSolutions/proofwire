@@ -43,6 +43,9 @@ function configFromEnv() {
   if (env.PROOFWIRE_CHECKPOINT_EVERY) config.checkpointEvery = Number(env.PROOFWIRE_CHECKPOINT_EVERY);
   if (env.PROOFWIRE_APPROVAL_TTL) config.approvalTtlSeconds = Number(env.PROOFWIRE_APPROVAL_TTL);
   if (env.PROOFWIRE_WITNESS_ONLY === '1') config.witnessOnly = true;
+  // A self-hosted hub whose identity provider is on its own network. Never on
+  // a hub whose tenants choose the issuer: see oidc.js.
+  if (env.PROOFWIRE_OIDC_ALLOW_PRIVATE === '1') config.oidcAllowPrivate = true;
   return config;
 }
 
