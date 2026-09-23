@@ -190,6 +190,27 @@ Three defaults chosen so the failure modes are safe:
   pipelined refunds all evaluate against an empty ledger and every one passes a
   cap they collectively blow through.
 
+### Try a policy before it can block anything
+
+```bash
+pw proxy --monitor -- npx -y @acme/mcp-crm
+```
+
+Monitor mode evaluates the policy exactly as enforcement would, then forwards
+every call anyway, including ones the egress guard would stop. Nothing is
+blocked and no one is asked to approve anything. It is the status quo plus a
+record. `pw log --would-block` and `pw stats` then show what the policy *would*
+have stopped, and which rule did it, against your real traffic. When that list
+contains only things you want stopped, drop the flag.
+
+The receipts stay truthful. A call that ran is recorded as `allow`, never as a
+`deny` that didn't happen. It also carries `"enforced": false` and, where the
+policy objected, `"wouldBe": "deny"` or `"escalate"`, all inside the signature.
+So a bundle shows an auditor that the policy was only observed, and a monitored
+call counts against budgets because it really spent the money. Set
+`"monitor": true` in `proofwire.config.json` to make it the default on a
+machine; `--enforce` overrides that. A hub's policy cannot switch it on.
+
 ### 2. Every action gets a receipt
 
 ```jsonc
@@ -266,9 +287,11 @@ Run
     --namespace <ns>             prefix tool names in receipts
     --principal <id>             who the agent is acting for
     --approve tty|webhook|deny   how escalations get resolved
+    --monitor                    block nothing; record what policy would block
+    --enforce                    gate even if the config says "monitor": true
 
 Inspect
-  pw log                         recent receipts  [--tail N --denied --target X --json]
+  pw log                         recent receipts  [--tail N --denied --would-block --target X --json]
   pw stats                       totals, spend, busiest tools
   pw dash                        browsable dashboard  [--port 7788]
 

@@ -256,8 +256,10 @@ their own keys and accept their own risk knowingly).
 
 - [x] Backup/restore runbook, drilled
 - [x] Invite and password reset
-- [ ] Monitor-only mode — removes the "what if it blocks something real"
-      objection entirely, and it is the single highest-leverage adoption fix
+- [x] Monitor-only mode — removes the "what if it blocks something real"
+      objection entirely, and it is the single highest-leverage adoption fix.
+      `pw proxy --monitor`; see README, "Try a policy before it can block
+      anything"
 - [ ] Weekly contact with every partner
 
 **This is where you learn whether anyone verifies anything.** If no auditor

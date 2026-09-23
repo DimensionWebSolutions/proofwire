@@ -63,7 +63,7 @@
   .row .seq, .row .time { color: var(--muted); font-family: var(--mono); font-size: 12px; }
   .row .target { font-family: var(--mono); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .row .meta { color: var(--muted); font-size: 12px; white-space: nowrap; }
-  .pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: .4px; }
+  .pill { font-size: 11px; font-weight: 700; padding: 2px 8px; border-radius: 999px; text-transform: uppercase; letter-spacing: .4px; white-space: nowrap; }
   .allow { background: color-mix(in srgb, var(--ok) 16%, transparent); color: var(--ok); }
   .deny { background: color-mix(in srgb, var(--deny) 18%, transparent); color: var(--deny); }
   .escalate { background: color-mix(in srgb, var(--warn) 18%, transparent); color: var(--warn); }
@@ -105,6 +105,7 @@
         <option value="">all outcomes</option>
         <option value="deny">blocked only</option>
         <option value="allow">allowed only</option>
+        <option value="would">would block (monitor mode)</option>
       </select>
       <select id="phase">
         <option value="">all phases</option>
@@ -159,6 +160,7 @@ function render() {
   const list = state.entries.filter((e) => {
     if (outcome === 'deny' && e.outcome === 'allow') return false;
     if (outcome === 'allow' && e.outcome !== 'allow') return false;
+    if (outcome === 'would' && !e.wouldBe) return false;
     if (phase && e.phase !== phase) return false;
     if (!q) return true;
     return [e.target, e.principal, e.reason, e.agent].join(' ').toLowerCase().includes(q);
@@ -170,12 +172,14 @@ function render() {
       <div class="row" role="option" data-seq="${e.seq}" aria-selected="${state.selected === e.seq}">
         <span class="seq">${e.seq}</span>
         <span class="time">${esc(e.ts.slice(11, 19))}</span>
-        <span><span class="pill ${esc(e.outcome)}">${esc(e.outcome)}</span></span>
+        <span>${e.wouldBe
+          ? `<span class="pill escalate" title="monitor mode: ran, not enforced">would ${esc(e.wouldBe)}</span>`
+          : `<span class="pill ${esc(e.outcome)}">${esc(e.outcome)}</span>`}</span>
         <span class="target">${esc(e.target)}
           ${e.phase !== 'atomic' ? `<span class="phase">${esc(e.phase)}</span>` : ''}
         </span>
         <span class="meta">${
-          e.outcome === 'allow'
+          e.outcome === 'allow' && !(e.wouldBe && !e.status)
             ? esc(e.status ?? '—') + (e.latencyMs != null ? ` · ${e.latencyMs}ms` : '')
             : esc((e.reason ?? '').slice(0, 44))
         }</span>
@@ -196,7 +200,10 @@ async function select(seq) {
     <h2>Receipt ${receipt.seq}</h2>
     <dl>
       <dt>tool</dt><dd><code>${esc(receipt.action.target)}</code></dd>
-      <dt>decision</dt><dd><span class="pill ${esc(d.outcome)}">${esc(d.outcome)}</span></dd>
+      <dt>decision</dt><dd><span class="pill ${esc(d.outcome)}">${esc(d.outcome)}</span>${
+        d.enforced === false
+          ? ` <span class="pill escalate">${d.wouldBe ? `would ${esc(d.wouldBe)} · ` : ''}not enforced</span>`
+          : ''}</dd>
       <dt>reason</dt><dd>${esc(d.reason ?? '—')}</dd>
       <dt>rules</dt><dd>${(d.rules ?? []).map((r) => `<span class="chip">${esc(r)}</span>`).join('') || '—'}</dd>
       ${d.approval ? `<dt>approved by</dt><dd>${esc(d.approval.by)}${d.approval.note ? ` — ${esc(d.approval.note)}` : ''}</dd>` : ''}

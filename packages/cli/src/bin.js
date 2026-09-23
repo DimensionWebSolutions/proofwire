@@ -191,6 +191,11 @@ async function cmdProxy(args) {
     err(c.yellow(`proofwire: ${w}`));
   }
 
+  // Monitor mode is chosen per machine, never by the hub: a policy pushed from
+  // elsewhere must not be able to switch a gate off without the operator
+  // seeing it. `--enforce` wins over a config file that says otherwise.
+  const monitor = !args.enforce && (args.monitor === true || config.monitor === true);
+
   let sink = null;
   if (remote) {
     sink = new RemoteSink({
@@ -219,6 +224,7 @@ async function cmdProxy(args) {
     args: args.rest.slice(1),
     namespace: args.namespace ?? config.namespace,
     metrics: config.metrics,
+    monitor,
   });
 
   // Diagnostics go to stderr: stdout is the MCP channel and must carry
@@ -229,8 +235,19 @@ async function cmdProxy(args) {
         `(${policy.hash.slice(0, 8)}) · wrapping: ${args.rest.join(' ')}`,
     ),
   );
+  if (monitor) {
+    err(
+      c.yellow(
+        'proofwire: MONITOR MODE — nothing will be blocked. Every call is forwarded; ' +
+          'what the policy would have stopped is recorded, not enforced. Use --enforce to gate.',
+      ),
+    );
+  }
   proxy.on('denied', ({ target, decision }) => {
     err(`${c.red('blocked')} ${target} — ${decision.reason}`);
+  });
+  proxy.on('monitored', ({ target, wouldBe, reason }) => {
+    err(`${c.yellow(`would ${wouldBe}`)} ${target} — ${reason}`);
   });
 
   const finish = () => {
@@ -259,7 +276,9 @@ async function cmdProxy(args) {
   err(
     c.grey(
       `proofwire · ${log.size} receipts · ${s.forwarded} allowed · ${s.denied} blocked · ` +
-        `${s.approved}/${s.escalated} approvals · root ${log.root.slice(0, 16)}…` +
+        `${s.approved}/${s.escalated} approvals · ` +
+        (monitor ? `${s.wouldDeny + s.wouldEscalate} would have been stopped (monitor mode) · ` : '') +
+        `root ${log.root.slice(0, 16)}…` +
         (sink ? ` · hub ${sink.status().behind === 0 ? 'in sync' : `${sink.status().behind} behind`}` : ''),
     ),
   );
@@ -311,6 +330,7 @@ function cmdLog(args) {
   if (args.target) entries = entries.filter((r) => r.action.target.includes(args.target));
   if (args.principal) entries = entries.filter((r) => r.actor.principal === args.principal);
   if (args.denied) entries = entries.filter((r) => r.decision.outcome !== 'allow');
+  if (args['would-block']) entries = entries.filter((r) => r.decision.wouldBe && r.phase !== 'outcome');
   if (args.session) entries = entries.filter((r) => r.actor.session === args.session);
 
   const shown = entries.slice(-limit);
@@ -332,10 +352,10 @@ function cmdLog(args) {
     shown.map((r) => [
       c.grey(String(r.seq)),
       r.ts.slice(11, 19),
-      outcomeBadge(r.decision.outcome),
+      r.decision.wouldBe ? c.yellow(`would ${r.decision.wouldBe}`) : outcomeBadge(r.decision.outcome),
       r.action.target,
       c.grey(r.actor.principal),
-      r.decision.outcome === 'allow'
+      r.decision.outcome === 'allow' && !(r.decision.wouldBe && !r.result)
         ? c.grey(
             r.result
               ? `${r.result.status}${r.result.latencyMs !== undefined ? ` ${r.result.latencyMs}ms` : ''}`
@@ -602,6 +622,9 @@ function cmdStats(args) {
   /** @type {Record<string, number>} */
   const spend = {};
   let errors = 0;
+  let unenforced = 0;
+  /** @type {Record<string, number>} */
+  const wouldBlock = {};
   let latency = 0;
   let timed = 0;
 
@@ -609,6 +632,16 @@ function cmdStats(args) {
     byOutcome[r.decision.outcome] = (byOutcome[r.decision.outcome] ?? 0) + 1;
     byTool[r.action.target] = (byTool[r.action.target] ?? 0) + 1;
     if (r.result?.status === 'error') errors++;
+    // Counted per call, not per receipt: a monitored call that ran has an
+    // intent and an outcome, and both carry the verdict.
+    if (r.phase !== 'outcome') {
+      if (r.decision.enforced === false) unenforced++;
+      if (r.decision.wouldBe) {
+        for (const rule of r.decision.rules.length ? r.decision.rules : ['(default)']) {
+          wouldBlock[rule] = (wouldBlock[rule] ?? 0) + 1;
+        }
+      }
+    }
     if (r.result?.latencyMs !== undefined) {
       latency += r.result.latencyMs;
       timed++;
@@ -623,6 +656,7 @@ function cmdStats(args) {
     ['receipts', String(e.length)],
     ['allowed', c.green(String(byOutcome.allow))],
     ['blocked', byOutcome.deny ? c.red(String(byOutcome.deny)) : '0'],
+    ...(unenforced ? [['not enforced', c.yellow(`${unenforced} calls ran in monitor mode`)]] : []),
     ['tool errors', String(errors)],
     ['avg latency', timed ? `${Math.round(latency / timed)} ms` : '—'],
     ['root', log.root.slice(0, 32) + '…'],
@@ -631,6 +665,11 @@ function cmdStats(args) {
   if (Object.keys(spend).length) {
     heading('Committed spend');
     kv(Object.entries(spend).map(([k, v]) => [k, v.toFixed(2)]));
+  }
+
+  if (Object.keys(wouldBlock).length) {
+    heading('Would have been stopped (monitor mode)');
+    kv(Object.entries(wouldBlock).sort((a, b) => b[1] - a[1]).map(([rule, n]) => [rule, c.yellow(String(n))]));
   }
 
   const top = Object.entries(byTool).sort((a, b) => b[1] - a[1]).slice(0, 10);
@@ -668,9 +707,11 @@ function cmdHelp() {
   out(`      ${c.grey('--principal <id>')}            who the agent is acting for`);
   out(`      ${c.grey('--approve tty|webhook|deny')}  how escalations get resolved`);
   out(`      ${c.grey('--no-remote')}                 record locally only, ignore the hub`);
+  out(`      ${c.grey('--monitor')}                   block nothing; record what policy would block`);
+  out(`      ${c.grey('--enforce')}                   gate even if the config says "monitor": true`);
   out('');
   out(`  ${c.bold('Inspect')}`);
-  out(`    ${c.cyan('pw log')}                         recent receipts  ${c.grey('[--tail N --denied --target X --json]')}`);
+  out(`    ${c.cyan('pw log')}                         recent receipts  ${c.grey('[--tail N --denied --would-block --target X --json]')}`);
   out(`    ${c.cyan('pw stats')}                       totals, spend, busiest tools`);
   out(`    ${c.cyan('pw dash')}                        browsable dashboard  ${c.grey('[--port 7788]')}`);
   out('');

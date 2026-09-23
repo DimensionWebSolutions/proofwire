@@ -20,6 +20,8 @@ const SERVER = fileURLToPath(new URL('../../../examples/fake-mcp-server.js', imp
  * @param {object[]} opts.send
  * @param {any} [opts.approver]
  * @param {Record<string, any>} [opts.metrics]
+ * @param {boolean} [opts.monitor]
+ * @param {(proxy: McpProxy) => void} [opts.onProxy]
  */
 async function run(opts) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'proofwire-proxy-'));
@@ -44,11 +46,13 @@ async function run(opts) {
     args: [SERVER],
     namespace: 'ops',
     metrics: opts.metrics,
+    monitor: opts.monitor,
     stdin,
     stdout,
     stderr,
   });
 
+  opts.onProxy?.(proxy);
   const done = proxy.start();
   for (const msg of opts.send) stdin.write(JSON.stringify(msg) + '\n');
 
@@ -314,6 +318,96 @@ test('the egress guard stops a credential from reaching a tool', async () => {
   assert.deepEqual(log.entries[0].decision.rules, ['egress.guard']);
   // And the log itself does not contain the key it blocked.
   assert.ok(!JSON.stringify(log.entries[0]).includes('Xk92mQvT1pLs8fR4nB6yH0jW'));
+});
+
+test('monitor mode forwards a call the policy would deny, and says so in the signed receipt', async () => {
+  /** @type {any[]} */
+  const events = [];
+  const { byId, log, proxy } = await run({
+    monitor: true,
+    policy: { rules: [{ id: 'no-refunds', match: { target: 'ops.refund' }, then: 'deny', reason: 'refunds are frozen' }] },
+    send: [call(1, 'refund', { order: 'ord_1', amount: 100 })],
+    onProxy: (p) => p.on('monitored', ({ target, wouldBe, reason }) => events.push({ target, wouldBe, reason })),
+  });
+
+  // It ran: the client got the upstream's real answer, not a refusal.
+  assert.equal(byId.get(1).result.isError, undefined);
+  assert.doesNotMatch(JSON.stringify(byId.get(1)), /Blocked by Proofwire/);
+
+  // And the record says it ran — intent then outcome, never an atomic "deny"
+  // for an action that happened.
+  assert.deepEqual(log.entries.map((r) => r.phase), ['intent', 'outcome']);
+  for (const r of log.entries) {
+    assert.equal(r.decision.outcome, 'allow');
+    assert.equal(r.decision.enforced, false);
+    assert.equal(r.decision.wouldBe, 'deny');
+    assert.deepEqual(r.decision.rules, ['no-refunds']);
+    assert.match(r.decision.reason, /^not enforced \(monitor mode\): would deny — /);
+  }
+  assert.equal(proxy.stats.wouldDeny, 1);
+  assert.deepEqual(events, [{ target: 'ops.refund', wouldBe: 'deny', reason: 'refunds are frozen' }]);
+  assert.equal(proxy.stats.denied, 0);
+  // The monitor fields are inside the signature, not decoration beside it.
+  assert.ok(log.audit().ok);
+});
+
+test('monitor mode marks even allowed calls as unenforced', async () => {
+  const { log } = await run({
+    monitor: true,
+    policy: { rules: [] },
+    send: [call(1, 'query', { sql: 'SELECT 1' })],
+  });
+  assert.equal(log.entries[0].decision.outcome, 'allow');
+  assert.equal(log.entries[0].decision.enforced, false);
+  assert.equal(log.entries[0].decision.wouldBe, undefined);
+});
+
+test('enforcing mode writes no monitor fields', async () => {
+  const { log } = await run({ policy: { rules: [] }, send: [call(1, 'query', { sql: 'SELECT 1' })] });
+  assert.equal('enforced' in log.entries[0].decision, false);
+  assert.equal('wouldBe' in log.entries[0].decision, false);
+});
+
+test('monitor mode never asks a human to approve a call that will run anyway', async () => {
+  let asked = 0;
+  const { byId, log, proxy } = await run({
+    monitor: true,
+    policy: { rules: [{ id: 'big', match: { target: 'ops.refund' }, then: 'escalate' }] },
+    approver: async () => {
+      asked++;
+      return { approved: false, by: 'nobody' };
+    },
+    send: [call(1, 'refund', { order: 'ord_1', amount: 100 })],
+  });
+  assert.equal(asked, 0);
+  assert.equal(byId.get(1).result.isError, undefined);
+  assert.equal(log.entries[0].decision.wouldBe, 'escalate');
+  assert.equal(log.entries[0].decision.approval, undefined);
+  assert.equal(proxy.stats.wouldEscalate, 1);
+  assert.equal(proxy.stats.escalated, 0);
+});
+
+test('monitor mode counts spend that really happened against the budget', async () => {
+  const { byId, log } = await run({
+    monitor: true,
+    policy: {
+      budgets: [
+        { id: 'spend.daily', match: { target: 'ops.refund' }, field: 'metrics.amount_usd', limit: 100, window: '24h', then: 'deny' },
+      ],
+    },
+    metrics: { 'ops.refund': { amount_usd: { from: 'params.amount', scale: 0.01 } } },
+    send: [
+      call(1, 'refund', { order: 'ord_1', amount: 6000 }),
+      call(2, 'refund', { order: 'ord_2', amount: 5000 }), // $110 — would breach
+      call(3, 'refund', { order: 'ord_3', amount: 1000 }), // $120 — still over
+    ],
+  });
+  for (const id of [1, 2, 3]) assert.equal(byId.get(id).result.isError, undefined, `call ${id} should have run`);
+  const intents = log.entries.filter((r) => r.phase === 'intent');
+  assert.deepEqual(intents.map((r) => r.decision.wouldBe), [undefined, 'deny', 'deny']);
+  // The third is over budget only because the second's $50 was counted: it
+  // ran, so it was spent.
+  assert.match(intents[2].decision.reason, /110 already committed plus 10 proposed/);
 });
 
 test('a call left unanswered at shutdown is recorded as unfinished', async () => {

@@ -115,6 +115,10 @@ export function openSeal(sealed, saltB64u, value) {
  * @property {string[]} rules    Rule ids that fired, in evaluation order.
  * @property {string} [reason]   Human-readable justification.
  * @property {{ by: string, at: string, note?: string }} [approval]
+ * @property {false} [enforced]  Present, and false, when the policy was only
+ *   observed (monitor mode): the call ran whatever the policy said.
+ * @property {'deny'|'escalate'} [wouldBe]  In monitor mode, what enforcement
+ *   would have done instead of letting the call through.
  */
 
 /**

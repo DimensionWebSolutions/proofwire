@@ -160,6 +160,8 @@ export function launchSpec(command, args) {
  * @property {NodeJS.WritableStream} [stdout]
  * @property {NodeJS.WritableStream} [stderr]
  * @property {Record<string,string>} [env]
+ * @property {boolean} [monitor]  Evaluate policy and record what it would have
+ *   done, but forward every call. See `_monitor`.
  */
 
 export class McpProxy extends EventEmitter {
@@ -176,7 +178,8 @@ export class McpProxy extends EventEmitter {
     this._pending = new Map();
     /** @type {import('node:child_process').ChildProcessWithoutNullStreams|null} */
     this.child = null;
-    this.stats = { forwarded: 0, denied: 0, escalated: 0, approved: 0, errors: 0 };
+    this.monitor = opts.monitor === true;
+    this.stats = { forwarded: 0, denied: 0, escalated: 0, approved: 0, errors: 0, wouldDeny: 0, wouldEscalate: 0 };
   }
 
   /**
@@ -280,7 +283,9 @@ export class McpProxy extends EventEmitter {
     /** @type {import('@proof_wire/core').Decision['approval']} */
     let approval;
 
-    if (decision.outcome === 'escalate') {
+    if (this.monitor) {
+      decision = this._monitor(decision, target);
+    } else if (decision.outcome === 'escalate') {
       this.stats.escalated++;
       // The approver sees a redacted preview, never the raw arguments. A
       // human clicking "approve" in Slack should not thereby paste a customer's
@@ -356,6 +361,41 @@ export class McpProxy extends EventEmitter {
     });
     this.stats.forwarded++;
     child.stdin.write(encode(message));
+  }
+
+  /**
+   * Monitor mode: the policy is evaluated exactly as it would be under
+   * enforcement, and then ignored. Every call goes through.
+   *
+   * The receipt still has to tell the truth, and the truth is that the action
+   * ran. So the outcome is always `allow` — a receipt saying `deny` for a call
+   * that reached the upstream server would be a false record, and budgets,
+   * which count allowed calls, would under-count real spend. What the policy
+   * *would* have done is kept alongside, inside the signed body: `enforced:
+   * false` on every receipt written in this mode, so an auditor can see the
+   * policy was not a gate, and `wouldBe` on the calls it would have stopped.
+   *
+   * Escalations are not sent to the approver. Asking a human to approve
+   * something that is going to run whatever they answer is theatre.
+   *
+   * @param {import('@proof_wire/core').PolicyDecision} decision
+   * @param {string} target
+   */
+  _monitor(decision, target) {
+    if (decision.outcome === 'allow') return { ...decision, enforced: false };
+
+    const wouldBe = decision.outcome;
+    if (wouldBe === 'escalate') this.stats.wouldEscalate++;
+    else this.stats.wouldDeny++;
+    const monitored = {
+      ...decision,
+      outcome: 'allow',
+      enforced: false,
+      wouldBe,
+      reason: `not enforced (monitor mode): would ${wouldBe} — ${decision.reason}`,
+    };
+    this.emit('monitored', { target, wouldBe, reason: decision.reason, decision: monitored });
+    return monitored;
   }
 
   /**

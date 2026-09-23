@@ -13,6 +13,16 @@ release together at the same version.
 
 ### Added
 
+- **Monitor mode: `pw proxy --monitor`**, or `"monitor": true` in
+  `proofwire.config.json` (`--enforce` overrides it). The policy is evaluated
+  as usual but every call is forwarded, and escalations never reach an
+  approver. Each receipt written in this mode carries `decision.enforced:
+  false`. A call the policy would have stopped is recorded as `allow` (it ran)
+  with `decision.wouldBe: "deny" | "escalate"` and a reason that says it was
+  not enforced. These fields are signed, and monitored calls count toward
+  budgets. `pw log --would-block` lists them, `pw stats` tallies them by rule,
+  and the dashboard and hub console label them "would deny". `McpProxy` takes
+  `monitor: true`.
 - **`witnesses/keys.json`**, the published record of Proofwire-operated
   witness keys — empty until there is a real node. Append-only, enforced by
   replaying its git history in CI; `pw check --witness-keys` reads it directly.

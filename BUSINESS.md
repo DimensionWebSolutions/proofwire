@@ -212,6 +212,8 @@ Listed because a plan without this section is marketing.
 2. **Python SDK** — most agent frameworks are Python; the proxy covers MCP but
    the library needs to meet people where they are.
 3. **Monitor-only mode** — removes the adoption objection entirely.
+   *Built:* `pw proxy --monitor`. Receipts record what the policy would have
+   done without claiming it did.
 4. **Policy test harness** — `pw policy test` against recorded traffic, so
    policies get the same treatment as code.
 5. **Compliance export** — AI Act Article 12 / SOC 2 evidence packs, generated

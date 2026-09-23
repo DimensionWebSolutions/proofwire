@@ -55,6 +55,8 @@ function summarise(r) {
     kind: r.action.kind,
     metrics: r.action.metrics ?? {},
     outcome: r.decision.outcome,
+    // Monitor mode: the call ran, but the policy would have stopped it.
+    wouldBe: r.decision.wouldBe ?? null,
     reason: r.decision.reason,
     rules: r.decision.rules ?? [],
     approval: r.decision.approval ?? null,

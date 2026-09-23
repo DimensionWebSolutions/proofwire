@@ -484,11 +484,13 @@ function logPage(hub, ctx) {
           return `<tr>
             <td class="mono dim">${e.seq}</td>
             <td class="dim mono">${esc(e.ts.slice(5, 19).replace('T', ' '))}</td>
-            <td><span class="pill ${esc(e.outcome)}">${esc(e.outcome)}</span></td>
+            <td>${body.decision.wouldBe
+              ? `<span class="pill escalate" title="monitor mode: ran, not enforced">would ${esc(body.decision.wouldBe)}</span>`
+              : `<span class="pill ${esc(e.outcome)}">${esc(e.outcome)}</span>`}</td>
             <td class="mono">${esc(e.target)}</td>
             <td class="dim mono">${esc(e.phase)}</td>
             <td class="dim">${esc(e.principal)}</td>
-            <td>${e.outcome === 'allow'
+            <td>${e.outcome === 'allow' && !body.decision.wouldBe
               ? `<span class="dim">${esc(e.status ?? 'committed')}${e.latency_ms != null ? ` · ${e.latency_ms}ms` : ''}</span>`
               : `<span style="color:var(--hold)">${esc((body.decision.reason ?? '').slice(0, 90))}</span>`}
               ${body.action.params?.redacted?.length
