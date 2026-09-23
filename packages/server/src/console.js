@@ -210,6 +210,7 @@ export function renderConsole(hub, ctx, route) {
  */
 function loginPage(hub, ctx) {
   const failed = ctx.query.get('e') === '1';
+  const throttled = ctx.query.get('e') === '2';
   return page(
     layout({
       title: 'Sign in',
@@ -220,6 +221,7 @@ function loginPage(hub, ctx) {
         <h1>Sign in</h1>
         <p class="sub">Operator console</p>
         ${failed ? '<div class="banner bad">Email or password is incorrect.</div>' : ''}
+        ${throttled ? '<div class="banner bad">Too many failed sign-ins for this account. Wait a few minutes, or reset your password.</div>' : ''}
         <form method="post" action="/login">
           <div class="field"><label for="email">Email</label>
             <input id="email" name="email" type="email" autocomplete="username" required></div>

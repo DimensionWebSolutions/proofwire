@@ -4,6 +4,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { ProofLog, verifyBundle, Policy, verifyInclusion, unhex, generateIdentity } from '@proof_wire/core';
 import { McpProxy, auditPolicyMetrics } from '@proof_wire/proxy';
+import { cmdPolicyTest } from './policy-test.js';
 import { RemoteSink, hubApprover, fetchPolicy } from '@proof_wire/proxy/remote';
 import { approverFrom } from '@proof_wire/proxy/approve';
 import { c, out, err, ok, bad, warn, info, heading, kv, table, outcomeBadge, parseArgs } from './ui.js';
@@ -713,6 +714,7 @@ function cmdHelp() {
   out(`  ${c.bold('Inspect')}`);
   out(`    ${c.cyan('pw log')}                         recent receipts  ${c.grey('[--tail N --denied --would-block --target X --json]')}`);
   out(`    ${c.cyan('pw stats')}                       totals, spend, busiest tools`);
+  out(`    ${c.cyan('pw policy test [file]')}          replay the log against a policy  ${c.grey('[--since --fail-on-change --json]')}`);
   out(`    ${c.cyan('pw dash')}                        browsable dashboard  ${c.grey('[--port 7788]')}`);
   out('');
   out(`  ${c.bold('Prove')}`);
@@ -722,7 +724,7 @@ function cmdHelp() {
   out(`    ${c.cyan('pw check <file>')}                verify a bundle with nothing but itself`);
   out('');
   out(`  ${c.bold('Hub')}   ${c.grey('connect to a Proofwire hub for your team')}`);
-  out(`    ${c.cyan('pw remote add --url <hub> --token <key>')}   connect this machine`);
+  out(`    ${c.cyan('pw remote add --url <hub> --token <key>')}   connect this machine ${c.grey('[--insecure for plain http]')}`);
   out(`    ${c.cyan('pw push')}                        ship local receipts the hub is missing`);
   out(`    ${c.cyan('pw remote-verify <log>')}         verify a hosted log from outside`);
   out(`    ${c.cyan('pw policy push|pull|list')}       manage the org's shared policy`);
@@ -744,7 +746,8 @@ const COMMANDS = {
   remote: cmdRemote,
   push: cmdPush,
   'remote-verify': cmdRemoteVerify,
-  policy: cmdPolicy,
+  // `test` replays the local log and needs no hub; the rest talk to one.
+  policy: (/** @type {any} */ args) => (args._[1] === 'test' ? cmdPolicyTest(args, loadConfig(args)) : cmdPolicy(args)),
   cosign: cmdCosign,
   proxy: cmdProxy,
   verify: cmdVerify,

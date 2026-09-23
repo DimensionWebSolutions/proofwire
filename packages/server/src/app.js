@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { createRequire } from 'node:module';
 import { EventEmitter } from 'node:events';
+import { randomBytes } from 'node:crypto';
 import {
   Policy,
   canonicalize,
@@ -16,7 +17,7 @@ import {
 import { openDatabase, newId, now, transact } from './db.js';
 import { Store, StoreError } from './store.js';
 import { signerFor, selfTest, disabledSigner } from './signer.js';
-import { Auth, Tokens, requireScope, requireLog, scopesForRole, verifyPassword, SCOPES, ROLES } from './auth.js';
+import { Auth, Tokens, requireScope, requireLog, scopesForRole, verifyPassword, hashPassword, SCOPES, ROLES } from './auth.js';
 import {
   Router,
   RateLimiter,
@@ -53,6 +54,12 @@ export const DEFAULT_CONFIG = {
   ingestRate: { capacity: 600, refillPerSec: 120 },
   apiRate: { capacity: 120, refillPerSec: 20 },
   authRate: { capacity: 10, refillPerSec: 0.2 },
+  /**
+   * Failed sign-ins per account, from anywhere. The per-address limit above
+   * does nothing against credential stuffing spread over thousands of
+   * addresses; this one does. Ten wrong guesses, then one more every 90s.
+   */
+  accountLoginRate: { capacity: 10, refillPerSec: 1 / 90 },
   trustProxy: false,
   approvalTtlSeconds: 900,
   /** Auto-checkpoint after this many new receipts. 0 disables. */
@@ -113,6 +120,7 @@ export class Hub {
       ingest: new RateLimiter(this.config.ingestRate),
       api: new RateLimiter(this.config.apiRate),
       auth: new RateLimiter(this.config.authRate),
+      account: new RateLimiter(this.config.accountLoginRate),
     };
 
     /** Wakes long-polling approval waiters the moment a human decides. */
@@ -274,9 +282,13 @@ export class Hub {
     // ── auth ────────────────────────────────────────────────────────────
     r.post('/v1/auth/login', async (ctx) => {
       const { email, password } = ctx.body ?? {};
-      const user = email ? this.auth.userByEmail(String(email)) : null;
-      const ok = user && password && verifyPasswordSafe(String(password), user.password_hash);
-      if (!ok) {
+      const attempt = this._checkLogin(ctx, email, password);
+      if (attempt.throttled) {
+        ctx.res.setHeader('retry-after', String(attempt.throttled));
+        throw new StoreError(429, 'too_many_attempts', 'too many failed sign-ins for this account; try again later');
+      }
+      const user = attempt.user;
+      if (!user) {
         // One message for both "no such user" and "wrong password": the
         // difference tells an attacker which emails are registered.
         throw new StoreError(401, 'invalid_credentials', 'email or password is incorrect');
@@ -1133,12 +1145,10 @@ export class Hub {
     });
 
     r.post('/login', (ctx) => {
-      const email = String(ctx.body?.email ?? '');
-      const password = String(ctx.body?.password ?? '');
-      const user = email ? this.auth.userByEmail(email) : null;
-      if (!user || !verifyPasswordSafe(password, user.password_hash)) {
-        return { __redirect: '/login?e=1' };
-      }
+      const attempt = this._checkLogin(ctx, ctx.body?.email, ctx.body?.password);
+      if (attempt.throttled) return { __redirect: '/login?e=2' };
+      const user = attempt.user;
+      if (!user) return { __redirect: '/login?e=1' };
       const session = this.auth.createSession(user.id);
       this.db.prepare('UPDATE users SET last_seen_at = ? WHERE id = ?').run(now(), user.id);
       const orgs = this.auth.orgsFor(user.id);
@@ -1283,6 +1293,49 @@ export class Hub {
   }
 
   /**
+   * Check a sign-in attempt, for both the API and the console form.
+   *
+   * Two things an attacker learns from a naive version, both closed here:
+   *
+   *   - Which emails exist. An unknown address used to return before scrypt
+   *     ran, ~50ms faster than a known one; now every attempt pays for one
+   *     scrypt, known user or not.
+   *   - Unlimited guesses. The per-address limiter is useless against a
+   *     botnet, so failures are also counted per account. A throttled account
+   *     is refused *before* the password is checked, so even the right
+   *     password does not get in until the window passes, and the same
+   *     refusal is given for addresses that do not exist.
+   *
+   * @param {import('./http.js').Ctx} ctx
+   * @param {unknown} email
+   * @param {unknown} password
+   * @returns {{ user: any, throttled: number }}
+   */
+  _checkLogin(ctx, email, password) {
+    const address = String(email ?? '').trim();
+    const key = `login:${address.toLowerCase()}`;
+    const gate = this.limiters.account.peek(key);
+    if (!gate.ok) {
+      // To the operator's log, not the tenant audit chain: an attempt on an
+      // address belongs to no organisation until it succeeds.
+      console.error(
+        JSON.stringify({
+          level: 'warn',
+          event: 'auth.login_throttled',
+          email: address.slice(0, 200),
+          from: clientAddress(ctx.req, this.config.trustProxy),
+        }),
+      );
+      return { user: null, throttled: gate.retryAfter };
+    }
+    const user = address ? this.auth.userByEmail(address) : null;
+    const ok = verifyPasswordSafe(String(password ?? ''), user?.password_hash ?? null) && Boolean(password);
+    if (ok) return { user, throttled: 0 };
+    this.limiters.account.take(key);
+    return { user: null, throttled: 0 };
+  }
+
+  /**
    * Whether a state-changing request originated from this hub's own pages.
    *
    * `Origin` is set by the browser on every POST and cannot be forged by page
@@ -1361,7 +1414,8 @@ export class Hub {
       // per-address limit alone would throttle every agent behind one NAT
       // together; a per-key limit alone would let unauthenticated floods past.
       const isIngest = url.pathname.endsWith('/receipts') && req.method === 'POST';
-      const isAuth = url.pathname.startsWith('/v1/auth/') || url.pathname === '/login';
+      const isAuth =
+        url.pathname.startsWith('/v1/auth/') || url.pathname === '/login' || url.pathname === '/forgot';
       const limiter = isIngest ? this.limiters.ingest : isAuth ? this.limiters.auth : this.limiters.api;
       const bucketKey = principal
         ? `${principal.kind}:${principal.id}`
@@ -1468,9 +1522,24 @@ export class Hub {
  * @param {string|null} hash
  */
 function verifyPasswordSafe(password, hash) {
-  if (!hash) return false;
+  if (!hash) {
+    // Same cost as a real check, so the response time does not say whether
+    // the account exists or has a password yet.
+    dummyPasswordHash ??= hashPassword(randomBytes(32).toString('hex'));
+    verifyPassword(password, dummyPasswordHash);
+    return false;
+  }
   return verifyPassword(password, hash);
 }
+
+/**
+ * A hash no password matches in practice; only its cost matters. Made on
+ * first use rather than at import, so a hub that never serves a sign-in (a
+ * witness node) never pays for it.
+ *
+ * @type {string | undefined}
+ */
+let dummyPasswordHash;
 
 /**
  * @param {string} name

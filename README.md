@@ -211,6 +211,21 @@ call counts against budgets because it really spent the money. Set
 `"monitor": true` in `proofwire.config.json` to make it the default on a
 machine; `--enforce` overrides that. A hub's policy cannot switch it on.
 
+Before you drop `--monitor`, or before you change a policy that is already
+enforcing, replay what you recorded against the new version:
+
+```bash
+pw policy test proofwire.policy.json
+pw policy test next.policy.json --fail-on-change   # exit 1 if any verdict differs
+```
+
+It lists each call whose verdict would change (`deny → allow`, `allow →
+escalate` and so on) and the rule that caused it. Each call is judged at the
+time it was recorded, and budgets count only what the new policy would have let
+through. The log keeps redacted arguments, not raw ones, so a call with masked
+values is marked `≈`: a rule that looked at the masked value cannot be replayed
+exactly.
+
 ### 2. Every action gets a receipt
 
 ```jsonc
@@ -293,6 +308,7 @@ Run
 Inspect
   pw log                         recent receipts  [--tail N --denied --would-block --target X --json]
   pw stats                       totals, spend, busiest tools
+  pw policy test [file]          replay the log against a policy  [--fail-on-change --json]
   pw dash                        browsable dashboard  [--port 7788]
 
 Prove
@@ -302,7 +318,8 @@ Prove
   pw check <file>                verify a bundle with nothing but itself
 
 Hub
-  pw remote add --url <hub> --token <key>   connect this machine
+  pw remote add --url <hub> --token <key>   connect this machine (https, or
+                                 http to localhost; --insecure to override)
   pw push                        ship local receipts the hub is missing
   pw remote-verify <log>         verify a hosted log from outside
   pw policy push|pull|list       manage the org's shared policy

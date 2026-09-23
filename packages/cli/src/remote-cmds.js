@@ -54,6 +54,27 @@ export function resolveRemote(args) {
   return { name, ...remote };
 }
 
+/**
+ * Whether a hub URL is safe to send a bearer token to.
+ *
+ * @param {string} raw
+ * @returns {null | 'invalid' | 'cleartext'}
+ */
+export function urlProblem(raw) {
+  let url;
+  try {
+    url = new URL(raw);
+  } catch {
+    return 'invalid';
+  }
+  if (url.protocol === 'https:') return null;
+  if (url.protocol !== 'http:') return 'invalid';
+  // Loopback traffic never leaves the machine.
+  const host = url.hostname.replace(/^\[|\]$/g, '');
+  const loopback = host === 'localhost' || host.endsWith('.localhost') || host === '::1' || /^127(\.\d{1,3}){3}$/.test(host);
+  return loopback ? null : 'cleartext';
+}
+
 /** @param {any} args */
 export async function cmdRemote(args) {
   const action = args._[1] ?? 'list';
@@ -89,6 +110,20 @@ export async function cmdRemote(args) {
       return 2;
     }
     const name = args.name ?? 'default';
+
+    // The token rides on every request to this URL. Over plain HTTP anyone on
+    // the path can read it and act as this machine, so it is refused unless
+    // the hub is on this machine, or the operator says they know.
+    const problem = urlProblem(String(args.url));
+    if (problem === 'invalid') {
+      bad(`not a URL: ${args.url}`);
+      return 2;
+    }
+    if (problem === 'cleartext' && !args.insecure) {
+      bad(`${args.url} is plain HTTP: the API key would cross the network unencrypted.`);
+      info('use https://, or pass --insecure if this network is one you trust (a lab, a private VPN).');
+      return 2;
+    }
 
     // Prove the credential works before storing it, so a typo surfaces now
     // rather than as silent shipping failures during a live agent session.

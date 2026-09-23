@@ -397,6 +397,14 @@ export class History {
    */
   constructor(entries = []) {
     this.entries = entries;
+    /**
+     * The moment windows are measured back from, in ms. Unset means "now".
+     * Replaying a recorded log sets it to each receipt's own time, so a rate
+     * limit is judged as it would have been then, not as of today.
+     *
+     * @type {number | undefined}
+     */
+    this.now = undefined;
   }
 
   /**
@@ -419,7 +427,7 @@ export class History {
    * @returns {import('./receipt.js').Receipt[]}
    */
   _relevant(rule, windowMs, evalCtx) {
-    const cutoff = Date.now() - windowMs;
+    const cutoff = (this.now ?? Date.now()) - windowMs;
     const clause = rule.match ?? rule.when ?? {};
     const scope = rule.per ? pluck(evalCtx, rule.per) : undefined;
 

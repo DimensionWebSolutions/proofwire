@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { binProblems } from './check-bins.mjs';
+import { hygieneProblems, trackedFiles } from './repo-hygiene.mjs';
 
 /**
  * Publish the workspace to npm, in dependency order, with the checks that
@@ -162,6 +163,16 @@ function preflight() {
     );
   } else {
     console.log(`  ${GREEN('✓')} bins   every #! line is LF`);
+  }
+
+  // 5b. Nothing secret in what is about to be tagged and published.
+  const hygiene = hygieneProblems(ROOT, trackedFiles(ROOT));
+  if (hygiene.length) {
+    console.log(`  ${RED('✗')} clean  ${hygiene.length} problem(s)`);
+    for (const p of hygiene) console.log(`           ${p}`);
+    blocking.push('Remove the flagged files or secrets. If a secret is real, rotate it as well.');
+  } else {
+    console.log(`  ${GREEN('✓')} clean  no keys, secrets or local state tracked`);
   }
 
   // 6. Tests. The last chance to find out before it is permanent.

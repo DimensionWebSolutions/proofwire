@@ -152,6 +152,22 @@ export class RateLimiter {
     this.buckets.set(key, { tokens: tokens - cost, at: nowMs });
     return { ok: true, remaining: Math.floor(tokens - cost), retryAfter: 0 };
   }
+
+  /**
+   * Whether `take` would succeed, without spending anything.
+   *
+   * @param {string} key
+   * @param {number} [cost]
+   * @returns {{ ok: boolean, retryAfter: number }}
+   */
+  peek(key, cost = 1) {
+    const bucket = this.buckets.get(key);
+    if (!bucket) return { ok: true, retryAfter: 0 };
+    const tokens = Math.min(this.capacity, bucket.tokens + ((Date.now() - bucket.at) / 1000) * this.refill);
+    return tokens >= cost
+      ? { ok: true, retryAfter: 0 }
+      : { ok: false, retryAfter: Math.ceil((cost - tokens) / this.refill) };
+  }
 }
 
 /**

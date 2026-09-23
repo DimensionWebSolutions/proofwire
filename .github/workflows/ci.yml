@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
 
+# Read-only unless a job says otherwise. Nothing in CI writes to the repo, so
+# a compromised step gets a token that can do nothing with it.
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ${{ matrix.os }}
@@ -20,17 +25,20 @@ jobs:
         node: ['22', '24']
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           # Full history: scripts/witness-record.test.mjs replays every commit
           # of witnesses/keys.json to prove it has only ever been appended to,
           # and a shallow clone has one commit to replay.
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node }}
 
       - run: npm install --no-audit --no-fund
+
+      - name: Repo hygiene
+        run: node scripts/repo-hygiene.mjs
 
       - name: Test
         run: npm test
@@ -50,8 +58,8 @@ jobs:
       matrix:
         node: ['20.11', '20', '22']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: ${{ matrix.node }}
       - run: npm install --no-audit --no-fund
@@ -63,8 +71,8 @@ jobs:
     # keep its own evidence intact, nothing else here is worth believing.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - run: npm install --no-audit --no-fund
@@ -79,8 +87,8 @@ jobs:
   load:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - run: npm install --no-audit --no-fund
@@ -97,8 +105,8 @@ jobs:
     # never touching the container — could not have.
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       # For @proof_wire/core in scripts/docker-smoke.mjs — the runner talks to

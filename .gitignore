@@ -17,5 +17,15 @@ data/
 *.db-wal
 *.db-shm
 
+# Secrets that must never reach a public repo, whatever they are called.
+.env
+.env.*
+*.pem
+*.key
+.npmrc
+credentials.json
+*.sqlite
+*.sqlite3
+
 # Local tooling
 .claude/

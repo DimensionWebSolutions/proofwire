@@ -104,6 +104,13 @@ honouring it lets anyone evade the per-address rate limit by inventing an
 address. Turn it on only when something you operate is guaranteed to overwrite
 it.
 
+Sign-in has a second limit that no header can dodge: failed attempts are
+counted per account, whatever address they come from. After ten, the account
+accepts one more attempt every 90 seconds, and it refuses even the correct
+password until then. The API answers `429 too_many_attempts`; the console says
+so on its sign-in page. An address with no account behaves identically, so the
+limit reveals nothing about which accounts exist.
+
 ---
 
 ## Keys

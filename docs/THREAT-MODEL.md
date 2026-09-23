@@ -185,6 +185,24 @@ Out of scope. Proofwire proxies a local stdio transport. Transport security
 between the tool server and whatever it talks to is that server's problem, and
 TLS's.
 
+The hub is a different matter: it is a network service, and its API keys
+travel over whatever URL the operator gives `pw remote add`. That command
+refuses plain `http://` to anything but the local machine unless `--insecure`
+is passed, so a typo cannot quietly send a token across a network in the clear.
+
+## A8 — Attacks on the operator's own tools
+
+Not attacks on the evidence, but on the people and machines that handle it.
+
+| Attack | Mitigation |
+| ------ | ---------- |
+| **DNS rebinding against `pw dash`.** A web page points its own domain at `127.0.0.1` and reads the local dashboard's receipts as if same-origin. | The dashboard answers only to `Host: 127.0.0.1`, `localhost` or `[::1]` on its own port; any other name gets a 403 before anything is read. |
+| **Script injection into the dashboard or console** via strings in receipts (tool names, reasons, principals). | Everything is escaped on output, and the dashboard's CSP allows only its own inline script, by SHA-256 hash, and no other script source. The hub console's CSP allows no script at all. Neither page can be framed. |
+| **Account discovery at hub sign-in** by timing: an unknown email used to return before the password hash ran. | Every attempt pays for one scrypt, known account or not, and the response is identical either way. |
+| **Credential stuffing** spread over many addresses, which a per-address limit never sees. | Failed sign-ins are also counted per account: ten, then one more every 90 seconds, from anywhere. A throttled account is refused before its password is checked, and an account that does not exist throttles identically. Password-reset requests share the strict sign-in limit. |
+| **A poisoned CI dependency** (a GitHub Action whose tag is moved to malicious code). | Every action is pinned to a full commit SHA; Dependabot proposes updates as reviewable PRs. Workflows get a read-only token unless a job declares otherwise. |
+| **A secret committed to this public repository.** | `scripts/repo-hygiene.mjs` runs in CI and before every release, refusing key files, salts, environment and database files, and token-shaped strings. Removing a pushed secret does not un-publish it, so the check runs before a push can matter. |
+
 ---
 
 ## Cryptographic choices

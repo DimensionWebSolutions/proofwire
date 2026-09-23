@@ -1,0 +1,17 @@
+# Keeps the SHA-pinned actions in .github/workflows current: each update
+# arrives as a PR that CI must pass, with the new commit and its tag spelled
+# out. The npm entry has nothing to do today (no dependencies), and exists so
+# that the first one ever added is watched from the day it lands.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ['*']
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly

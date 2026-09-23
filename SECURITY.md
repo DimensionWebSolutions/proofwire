@@ -64,9 +64,30 @@ will be closed as known — see [`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md):
 
 ## Supported versions
 
-Pre-1.0: only the latest release. Security fixes ship as a patch release and
-are noted in the changelog with the reporter credited, unless they prefer
-otherwise.
+| Version | Supported |
+| ------- | --------- |
+| Latest release | Yes |
+| Anything older | No: upgrade |
+
+Pre-1.0, only the latest release gets fixes. Security fixes ship as a patch
+release and are noted in the changelog with the reporter credited, unless they
+prefer otherwise.
+
+## How the project protects itself
+
+- **Static analysis:** CodeQL runs on every push, every pull request and weekly.
+- **Dependencies:** there are no third-party runtime dependencies. Dependabot
+  watches the CI actions, and any npm dependency that is ever added.
+- **CI supply chain:** every GitHub Action is pinned to a full commit SHA, and
+  workflows run with a read-only token unless a job needs more.
+- **No secrets in the repo:** `scripts/repo-hygiene.mjs` blocks key files, salts,
+  environment and database files, and token-shaped strings, in CI and before
+  every release.
+- **Releases** are built and published from CI, with npm provenance linking each
+  tarball to the commit and workflow run that produced it.
+
+The attacks these answer are listed in
+[`docs/THREAT-MODEL.md`](docs/THREAT-MODEL.md), section A8.
 
 ## Our commitments
 

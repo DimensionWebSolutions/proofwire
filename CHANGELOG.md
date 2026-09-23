@@ -5,6 +5,27 @@ release together at the same version.
 
 ## Unreleased
 
+### Security
+
+- **`pw dash` refuses requests whose `Host` is not its own**, which closes DNS
+  rebinding: a web page could previously point its own domain at `127.0.0.1`
+  and read the local dashboard's receipts. The page is also served with a CSP
+  that allows only its own inline script, by hash, and forbids framing. Internal
+  errors no longer echo their message, which could include file paths.
+- **Hub sign-in no longer reveals which emails have accounts.** An unknown
+  address now costs the same scrypt as a wrong password.
+- **Failed sign-ins are limited per account**, as well as per address: ten, then
+  one more every 90 seconds (`accountLoginRate`). A throttled account is
+  refused before its password is checked (`429 too_many_attempts`, or a notice
+  on the console sign-in page). `/forgot` now falls under the strict auth limit.
+- **`pw remote add` refuses a plain `http://` hub URL** unless it is on this
+  machine or `--insecure` is given, so an API key is not sent unencrypted by
+  accident.
+- **CI hardening:** every GitHub Action is pinned to a commit SHA, workflows
+  default to a read-only token, and CodeQL and Dependabot are configured.
+  `scripts/repo-hygiene.mjs` blocks keys, salts, environment and database files,
+  and token-shaped strings in CI and in the release preflight.
+
 ### Fixed
 
 - **`pw proxy` no longer triggers Node's DEP0190 warning on Windows** when it
@@ -19,6 +40,14 @@ release together at the same version.
 
 ### Added
 
+- **`pw policy test [policy-file]`** replays the local log against a policy and
+  lists every call whose verdict would change, such as `deny → allow`, with the
+  rule responsible. Each call is judged at its recorded time, against only what
+  the new policy would have let through, so budgets and rate limits behave as
+  they would have live. Monitored calls are compared on what the policy would
+  have done. Options: `--since`, `--session`, `--target`, `--json`, `--all`, and
+  `--fail-on-change` (exit 1 if anything differs, for CI). Calls whose logged
+  arguments were partly masked are marked approximate. No hub is needed.
 - **Monitor mode: `pw proxy --monitor`**, or `"monitor": true` in
   `proofwire.config.json` (`--enforce` overrides it). The policy is evaluated
   as usual but every call is forwarded, and escalations never reach an

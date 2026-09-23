@@ -216,5 +216,7 @@ Listed because a plan without this section is marketing.
    done without claiming it did.
 4. **Policy test harness** — `pw policy test` against recorded traffic, so
    policies get the same treatment as code.
+   *Built:* `pw policy test [file] --fail-on-change` replays the log and lists
+   every verdict the new policy would change.
 5. **Compliance export** — AI Act Article 12 / SOC 2 evidence packs, generated
    from receipts. This is what turns a developer tool into a line item.

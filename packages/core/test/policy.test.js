@@ -178,6 +178,30 @@ test('rate limits count only allowed calls in the window', () => {
   assert.match(blocked.reason, /rate limit email.burst exhausted: 3 of 3/);
 });
 
+test('a history can be judged as of a past moment, for replaying a recorded log', () => {
+  const p = pol({
+    rateLimits: [{ id: 'email.burst', match: { target: 'gmail.send' }, limit: 1, window: '1h' }],
+  });
+  const sent = (/** @type {string} */ ts) => ({
+    ts,
+    actor: ACTOR,
+    action: { kind: 'tool_call', target: 'gmail.send', params: { preview: {} }, metrics: {} },
+    decision: { outcome: 'allow' },
+  });
+  const history = new History([sent('2026-01-01T10:00:00Z')]);
+
+  // Measured from today, a call in January is long outside the window.
+  assert.equal(p.decide(ctx('gmail.send'), history).outcome, 'allow');
+
+  // Measured from half an hour after it, the same call still counts.
+  history.now = Date.parse('2026-01-01T10:30:00Z');
+  assert.equal(p.decide(ctx('gmail.send'), history).outcome, 'deny');
+
+  // And from two hours after, it has aged out.
+  history.now = Date.parse('2026-01-01T12:00:00Z');
+  assert.equal(p.decide(ctx('gmail.send'), history).outcome, 'allow');
+});
+
 test('denied calls do not consume quota', () => {
   const p = pol({
     rateLimits: [{ id: 'email.burst', match: { target: 'gmail.send' }, limit: 2, window: '1h' }],
