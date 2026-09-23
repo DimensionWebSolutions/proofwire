@@ -31,7 +31,7 @@ ceiling, and a server will be several times better.
 | Storage | 2.5 KB/receipt | 1M receipts ≈ 2.3 GB |
 | Cold tree rebuild, 4,000 leaves | 29 ms | Restart cost is negligible |
 | Dependencies | **0** | 5 workspace packages, nothing from the registry |
-| Tests | **207** | Including published RFC 6962 and RFC 8032 vectors |
+| Tests | **400+** | Including published RFC 6962, RFC 8032 and Slack signature vectors |
 
 Capacity is not the constraint. A single hub process comfortably handles far
 more agent traffic than any early customer will generate.
