@@ -1,10 +1,11 @@
 #!/usr/bin/env node
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { binProblems } from './check-bins.mjs';
 import { hygieneProblems, trackedFiles } from './repo-hygiene.mjs';
+import { launchSpec } from '../packages/proxy/src/proxy.js';
 
 /**
  * Publish the workspace to npm, in dependency order, with the checks that
@@ -50,11 +51,11 @@ const otp = process.argv.find((a) => a.startsWith('--otp='))?.slice('--otp='.len
 /**
  * Run a command, coping with Windows' `.cmd` shims.
  *
- * `npm` on Windows is a shim Node will not spawn without a shell — but passing
- * an argv *array* with `shell: true` is deprecated precisely because Node
- * concatenates it unescaped. So on Windows we build the one string ourselves,
- * quoting as we go; everywhere else argv is passed through untouched, which is
- * safer and needs no quoting at all.
+ * `npm` on Windows is a shim Node will not spawn without a shell. The proxy
+ * already solves exactly this for MCP servers (`launchSpec`: executables run
+ * directly, shims get one fully quoted command line), so this uses it rather
+ * than keeping a second, weaker copy. Everywhere else argv passes through
+ * untouched.
  *
  * @param {string} cmd
  * @param {string[]} args
@@ -68,12 +69,8 @@ function run(cmd, args, opts = {}) {
     ...opts,
   };
 
-  if (process.platform !== 'win32') {
-    return execFileSync(cmd, args, common);
-  }
-
-  const quote = (a) => (/[\s"^&|<>()%!]/.test(a) ? `"${a.replace(/"/g, '\\"')}"` : a);
-  return execSync([cmd, ...args.map(quote)].join(' '), common);
+  const spec = launchSpec(cmd, args);
+  return execFileSync(spec.command, spec.args, { ...common, shell: spec.shell });
 }
 
 /** @param {string} rel */

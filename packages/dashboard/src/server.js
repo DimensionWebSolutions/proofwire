@@ -31,7 +31,7 @@ const TYPES = {
  */
 function inlineScriptHashes() {
   const html = fs.readFileSync(path.join(PUBLIC, 'index.html'), 'utf8');
-  return [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)].map(
+  return [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)].map(
     (m) => `'sha256-${createHash('sha256').update(m[1], 'utf8').digest('base64')}'`,
   );
 }
@@ -103,6 +103,25 @@ export function allowedHosts(host, port) {
 export function insideRoot(root, rel) {
   const file = path.resolve(root, rel);
   return file.startsWith(root + path.sep) ? file : null;
+}
+
+/**
+ * A regular file's bytes, or null. Checked and read through one handle, so
+ * what is served is what was checked.
+ *
+ * @param {string} file
+ * @returns {Buffer | null}
+ */
+function readFileOrNull(file) {
+  let fd;
+  try {
+    fd = fs.openSync(file, 'r');
+    return fs.fstatSync(fd).isFile() ? fs.readFileSync(fd) : null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
+  }
 }
 
 /**
@@ -216,10 +235,8 @@ export function createServer(opts) {
       if (!file) {
         return json(res, 403, { error: 'forbidden' });
       }
-      if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
-        return json(res, 404, { error: 'not found' });
-      }
-      const body = fs.readFileSync(file);
+      const body = readFileOrNull(file);
+      if (!body) return json(res, 404, { error: 'not found' });
       res.writeHead(200, {
         ...COMMON_HEADERS,
         'content-type': TYPES[path.extname(file)] ?? 'application/octet-stream',

@@ -6,7 +6,7 @@ import path from 'node:path';
 import { ProofLog, verifyBundle } from '../src/log.js';
 import { canonicalize } from '../src/canonical.js';
 import { identityFromPem, generateIdentity } from '../src/keys.js';
-import { buildReceipt, signReceipt, entryHash, GENESIS_PREV } from '../src/receipt.js';
+import { signReceipt, entryHash, GENESIS_PREV } from '../src/receipt.js';
 import { cosign, verifyCheckpoint } from '../src/checkpoint.js';
 
 /** @returns {string} */

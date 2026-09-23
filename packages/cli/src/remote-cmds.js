@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { ProofLog, Policy, verifyBundle } from '@proof_wire/core';
-import { RemoteSink, fetchPolicy } from '@proof_wire/proxy/remote';
+import { RemoteSink, fetchPolicy, trimSlashes } from '@proof_wire/proxy/remote';
 import { c, out, ok, bad, warn, info, heading, kv, table } from './ui.js';
 import { witnessKeysFrom } from './witness-keys.js';
 
@@ -129,7 +129,7 @@ export async function cmdRemote(args) {
     // rather than as silent shipping failures during a live agent session.
     let who;
     try {
-      const res = await fetch(String(args.url).replace(/\/+$/, '') + '/v1/me', {
+      const res = await fetch(trimSlashes(String(args.url)) + '/v1/me', {
         headers: { authorization: `Bearer ${args.token}` },
         signal: AbortSignal.timeout(15_000),
       });
@@ -148,7 +148,7 @@ export async function cmdRemote(args) {
     }
 
     const remotes = loadRemotes();
-    remotes[name] = { url: String(args.url).replace(/\/+$/, ''), token: String(args.token) };
+    remotes[name] = { url: trimSlashes(String(args.url)), token: String(args.token) };
     if (args.log) remotes[name].log = String(args.log);
     saveRemotes(remotes);
 

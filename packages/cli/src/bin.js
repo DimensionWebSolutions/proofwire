@@ -107,6 +107,31 @@ const STARTER_CONFIG = {
 
 // ──────────────────────────────────────────────────────────── commands ──
 
+/**
+ * Create a file, or leave it alone if it exists. One call, so nothing can
+ * appear between the check and the write and be overwritten.
+ *
+ * @param {string} file
+ * @param {string} text
+ */
+function writeIfAbsent(file, text) {
+  try {
+    fs.writeFileSync(file, text, { flag: 'wx' });
+  } catch (err) {
+    if (/** @type {NodeJS.ErrnoException} */ (err).code !== 'EEXIST') throw err;
+  }
+}
+
+/** @param {string} file */
+function readIfPresent(file) {
+  try {
+    return fs.readFileSync(file, 'utf8');
+  } catch (err) {
+    if (/** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT') return '';
+    throw err;
+  }
+}
+
 /** @param {any} args */
 function cmdInit(args) {
   const dir = path.resolve(args.log ?? '.proofwire');
@@ -116,12 +141,12 @@ function cmdInit(args) {
   }
 
   const log = ProofLog.create(dir);
-  if (!fs.existsSync(POLICY)) fs.writeFileSync(POLICY, STARTER_POLICY);
-  if (!fs.existsSync(CONFIG)) fs.writeFileSync(CONFIG, JSON.stringify(STARTER_CONFIG, null, 2) + '\n');
+  writeIfAbsent(POLICY, STARTER_POLICY);
+  writeIfAbsent(CONFIG, JSON.stringify(STARTER_CONFIG, null, 2) + '\n');
 
   const gitignore = '.gitignore';
   const rules = ['.proofwire/key.pem', '.proofwire/salts.jsonl'];
-  const existing = fs.existsSync(gitignore) ? fs.readFileSync(gitignore, 'utf8') : '';
+  const existing = readIfPresent(gitignore);
   const missing = rules.filter((r) => !existing.includes(r));
   if (missing.length) {
     fs.appendFileSync(

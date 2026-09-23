@@ -1,5 +1,3 @@
-import { randomBytes } from 'node:crypto';
-
 /**
  * Ships locally-signed receipts to a Proofwire hub.
  *
@@ -19,6 +17,19 @@ import { randomBytes } from 'node:crypto';
  *                         because silently dropping it defeats the point
  */
 
+/**
+ * Drop trailing slashes from a URL. A loop rather than a `/+$` regex, which
+ * backtracks quadratically on a long run of slashes followed by anything else.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+export function trimSlashes(s) {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47) end--;
+  return s.slice(0, end);
+}
+
 const DEFAULT_FLUSH_MS = 2000;
 const DEFAULT_BATCH = 200;
 
@@ -34,7 +45,7 @@ export class RemoteSink {
    * @param {(level: string, msg: string) => void} [opts.onLog]
    */
   constructor(opts) {
-    this.url = opts.url.replace(/\/+$/, '');
+    this.url = trimSlashes(opts.url);
     this.token = opts.token;
     this.log = opts.log;
     this.localLog = opts.localLog;
@@ -291,7 +302,7 @@ export class RemoteSink {
  * @returns {(req: any) => Promise<{approved: boolean, by: string, note?: string}>}
  */
 export function hubApprover(opts) {
-  const base = opts.url.replace(/\/+$/, '');
+  const base = trimSlashes(opts.url);
   const timeoutMs = opts.timeoutMs ?? 300_000;
 
   return async (req) => {
@@ -366,7 +377,7 @@ export function hubApprover(opts) {
  * @returns {Promise<{ policy: object, version: number, hash: string }|null>}
  */
 export async function fetchPolicy(opts) {
-  const base = opts.url.replace(/\/+$/, '');
+  const base = trimSlashes(opts.url);
   const res = await fetch(`${base}/v1/policies/${encodeURIComponent(opts.slug)}`, {
     headers: { authorization: `Bearer ${opts.token}` },
     signal: AbortSignal.timeout(15_000),

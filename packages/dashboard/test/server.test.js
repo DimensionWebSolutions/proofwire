@@ -77,7 +77,7 @@ test('the page is served under a CSP that allows its own script by hash and noth
     assert.equal(page.headers['referrer-policy'], 'no-referrer');
 
     // Every script on the page must be covered, or the dashboard renders blank.
-    const scripts = [...page.body.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/g)];
+    const scripts = [...page.body.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script\s*>/gi)];
     assert.ok(scripts.length > 0);
     for (const [, code] of scripts) {
       const hash = createHash('sha256').update(code, 'utf8').digest('base64');

@@ -5,18 +5,15 @@ import { randomBytes } from 'node:crypto';
 import {
   Policy,
   canonicalize,
-  verifyCheckpoint,
   checkpointDigest,
-  sign as signBytes,
   verify as verifyBytes,
   identityFromPublicKey,
   unhex,
-  hex,
   verifyConsistency,
 } from '@proof_wire/core';
 import { openDatabase, newId, now, transact } from './db.js';
 import { Store, StoreError } from './store.js';
-import { signerFor, selfTest, disabledSigner } from './signer.js';
+import { signerFor, disabledSigner } from './signer.js';
 import { Auth, Tokens, requireScope, requireLog, scopesForRole, verifyPassword, hashPassword, SCOPES, ROLES } from './auth.js';
 import {
   Router,
@@ -1255,7 +1252,7 @@ export class Hub {
    * @returns {string}
    */
   _publicUrl(ctx) {
-    if (this.config.publicUrl) return this.config.publicUrl.replace(/\/+$/, '');
+    if (this.config.publicUrl) return trimSlashes(this.config.publicUrl);
     const host = ctx.req.headers.host ?? `localhost:${this.config.port}`;
     return `http${process.env.PROOFWIRE_INSECURE_COOKIES === '1' ? '' : 's'}://${host}`;
   }
@@ -1513,6 +1510,19 @@ export class Hub {
 }
 
 // ── helpers ─────────────────────────────────────────────────────────────
+
+/**
+ * Drop trailing slashes from a URL. A loop rather than a `/+$` regex, which
+ * backtracks quadratically on a long run of slashes followed by anything else.
+ *
+ * @param {string} s
+ * @returns {string}
+ */
+function trimSlashes(s) {
+  let end = s.length;
+  while (end > 0 && s.charCodeAt(end - 1) === 47) end--;
+  return s.slice(0, end);
+}
 
 /**
  * A user with no password set (invited but never activated) must not be able

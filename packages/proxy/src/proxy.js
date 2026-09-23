@@ -1,4 +1,6 @@
 import { spawn } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import { createRequire } from 'node:module';
 import { LineFramer, encode, isRequest, isResponse, toolRefusal } from './jsonrpc.js';
@@ -107,16 +109,63 @@ export function auditPolicyMetrics(policy, metricsConfig) {
   return warnings;
 }
 
+/** Every character cmd.exe gives meaning to, quotes included. */
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+
 /**
- * Quote an argument for cmd.exe, which is what `shell: true` invokes on
- * Windows. Node concatenates argv into one string in shell mode without
- * escaping anything, so unquoted spaces silently split into extra arguments.
+ * Quote one argument for a command line that cmd.exe parses first and the
+ * program's C runtime parses second.
  *
- * @param {string} s
+ * Two parsers, two sets of rules, so two layers:
+ *
+ *   1. For the C runtime (how every Windows program splits its command line):
+ *      wrap in quotes; escape a quote as `\"`; and double any backslashes
+ *      that precede a quote or the closing quote, since `\"` would otherwise
+ *      read as a literal quote. Without that, `C:\dir\` swallows its closing
+ *      quote and merges with the next argument.
+ *   2. For cmd.exe, which knows nothing of backslash escapes: prefix every
+ *      metacharacter with `^`, quotes included. cmd.exe's own idea of "inside
+ *      quotes" then never comes into play, so `a"&calc` cannot close a quote
+ *      and start a second command.
+ *
+ * A `.cmd` or `.bat` shim (npx, npm, yarn) passes its arguments through cmd.exe
+ * once more when it runs `%*`, so those get the second layer twice.
+ *
+ * @param {string} arg
+ * @param {boolean} [shim]  The target is a batch file.
  * @returns {string}
  */
-function winQuote(s) {
-  return /[\s"^&|<>()%!]/.test(s) ? '"' + s.replace(/"/g, '\\"') + '"' : s;
+export function winQuote(arg, shim = false) {
+  let s = String(arg)
+    .replace(/(\\*)"/g, '$1$1\\"')
+    .replace(/(\\*)$/, '$1$1');
+  s = `"${s}"`.replace(CMD_META, '^$1');
+  return shim ? s.replace(CMD_META, '^$1') : s;
+}
+
+/**
+ * Find what a bare command name will actually run, the way cmd.exe would:
+ * each directory on PATH in turn, each extension in PATHEXT in turn.
+ *
+ * @param {string} name
+ * @param {Record<string, string | undefined>} env
+ * @returns {string | null}
+ */
+export function whichWindows(name, env) {
+  const pathVar = env.PATH ?? env.Path ?? '';
+  const exts = (env.PATHEXT ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean);
+  const hasExt = /\.[^\\/.]+$/.test(name);
+  for (const dir of pathVar.split(';').filter(Boolean)) {
+    for (const ext of hasExt ? [''] : exts) {
+      const candidate = path.join(dir, name + ext.toLowerCase());
+      try {
+        if (fs.statSync(candidate).isFile()) return candidate;
+      } catch {
+        // Not here; keep looking.
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -125,32 +174,37 @@ function winQuote(s) {
  * Windows makes this a genuine fork in the road. Since the fix for
  * CVE-2024-27980, Node refuses to spawn `.cmd` and `.bat` files without a
  * shell — and `npx`, `npm` and `yarn`, which is how nearly every MCP server is
- * launched, are exactly that. But turning the shell on unconditionally is
- * worse: in shell mode the command line is concatenated unescaped, so an
- * interpreter at `C:\Program Files\nodejs\node.exe` is split at the space and
- * nothing starts at all.
+ * launched, are exactly that. But a shell is a second parser with its own
+ * metacharacters, and every argument must survive it.
  *
- * So: a command that names a path or an executable is spawned directly; a bare
- * name, which might be a shim, goes through the shell with everything quoted.
+ * So the command is resolved first, as cmd.exe would resolve it:
  *
- * The shell path hands Node one finished command line and no argv. Node would
- * only join the pieces with spaces itself, which is the same string cmd.exe
- * ends up with. But given separate args with `shell: true` it also prints
- * DEP0190, a warning that exists precisely because Node does not quote them.
- * We already have, so we pass the result, not the parts.
+ *   - An executable (`.exe`, `.com`) is spawned directly, with a real argv,
+ *     and no shell anywhere. Node's own quoting is then all that applies.
+ *   - A batch file goes through cmd.exe as one command line with everything
+ *     quoted by `winQuote`, and no separate argv. Handing Node args together
+ *     with `shell: true` is what it warns about as DEP0190, because it would
+ *     join them unescaped.
+ *   - A name that cannot be found is left for cmd.exe to report.
  *
  * @param {string} command
  * @param {string[]} args
  * @param {NodeJS.Platform} [platform]  For tests; defaults to this machine's.
+ * @param {(name: string) => string | null} [which]  For tests; defaults to a PATH search.
  * @returns {{ command: string, args: string[], shell: boolean }}
  */
-export function launchSpec(command, args, platform = process.platform) {
+export function launchSpec(command, args, platform = process.platform, which = (n) => whichWindows(n, process.env)) {
   if (platform !== 'win32') return { command, args, shell: false };
 
-  const namesAPath = /[\\/]/.test(command) || /\.(exe|com)$/i.test(command);
-  if (namesAPath) return { command, args, shell: false };
+  const namesAPath = /[\\/]/.test(command);
+  const resolved = namesAPath ? command : which(command);
+  const target = resolved ?? command;
 
-  return { command: [command, ...args].map(winQuote).join(' '), args: [], shell: true };
+  if (resolved && !/\.(bat|cmd)$/i.test(resolved)) return { command: resolved, args, shell: false };
+
+  const shim = /\.(bat|cmd)$/i.test(target);
+  const line = [target.replace(CMD_META, '^$1'), ...args.map((a) => winQuote(a, shim))].join(' ');
+  return { command: line, args: [], shell: true };
 }
 
 /**

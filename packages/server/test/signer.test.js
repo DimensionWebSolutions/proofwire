@@ -8,8 +8,6 @@ import { generateIdentity, verify, verifyCheckpoint } from '@proof_wire/core';
 import {
   localSigner,
   commandSigner,
-  httpSigner,
-  disabledSigner,
   normalizeSignature,
   selfTest,
   signerFor,

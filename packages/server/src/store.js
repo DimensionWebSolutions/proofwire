@@ -12,7 +12,6 @@ import {
   verifyConsistency,
   GENESIS_PREV,
   buildCheckpoint,
-  signCheckpoint,
   signCheckpointWith,
   identityFromPem,
   generateIdentity,

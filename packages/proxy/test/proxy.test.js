@@ -483,66 +483,80 @@ test('a full session leaves an audit that verifies and a bundle that travels', a
   assert.equal(res.checked, 5);
 });
 
-test('launching handles Windows shims and spaced interpreter paths alike', async () => {
+test('off Windows, the command and its argv pass through untouched', async () => {
   const { launchSpec } = await import('../src/proxy.js');
-  const spec = launchSpec(process.execPath, ['server.js']);
-
-  if (process.platform === 'win32') {
-    // A real path must never go through the shell: cmd.exe would split
-    // "C:\Program Files\nodejs\node.exe" at the space and start nothing.
-    assert.equal(spec.shell, false);
-    assert.equal(spec.command, process.execPath);
-
-    // A bare name might be an npx/npm .cmd shim, which Node will not spawn
-    // directly, so it goes through the shell — with everything quoted.
-    const shim = launchSpec('npx', ['-y', '@acme/mcp server']);
-    assert.equal(shim.shell, true);
-    assert.equal(shim.command, 'npx -y "@acme/mcp server"');
-    assert.deepEqual(shim.args, []);
-  } else {
-    assert.equal(spec.shell, false);
-    assert.equal(launchSpec('npx', ['-y', 'x']).shell, false);
-  }
-});
-
-test('a Windows shim is launched as one quoted command line, never shell plus argv', async () => {
-  const { launchSpec } = await import('../src/proxy.js');
-
-  // Separate args with `shell: true` is what Node 24 flags as DEP0190: Node
-  // concatenates them unescaped. The spec must carry the finished line.
-  const spec = launchSpec('npx', ['-y', '@acme/mcp server', 'a"b', '100%', 'x&y'], 'win32');
-  assert.equal(spec.shell, true);
-  assert.deepEqual(spec.args, []);
-  assert.equal(spec.command, String.raw`npx -y "@acme/mcp server" "a\"b" "100%" "x&y"`);
-
-  // Quoting applies to the command name too, exactly as it did before.
-  assert.equal(launchSpec('my tool', [], 'win32').command, '"my tool"');
-
-  // Paths and executables still skip the shell and keep their argv intact.
-  const node = String.raw`C:\Program Files\nodejs\node.exe`;
-  assert.deepEqual(launchSpec(node, ['server.js', 'a b'], 'win32'), {
-    command: node,
-    args: ['server.js', 'a b'],
+  assert.deepEqual(launchSpec('npx', ['-y', 'a b'], 'linux'), { command: 'npx', args: ['-y', 'a b'], shell: false });
+  assert.deepEqual(launchSpec(process.execPath, ['server.js'], 'darwin'), {
+    command: process.execPath,
+    args: ['server.js'],
     shell: false,
   });
-  assert.deepEqual(launchSpec('npx', ['-y', 'x'], 'linux'), { command: 'npx', args: ['-y', 'x'], shell: false });
 });
 
-test('a shim launched through the shell runs its arguments and raises no DEP0190', { skip: process.platform !== 'win32' }, async () => {
+test('on Windows, an executable is spawned directly and a batch shim through one quoted command line', async () => {
   const { launchSpec } = await import('../src/proxy.js');
+  const node = String.raw`C:\Program Files\nodejs\node.exe`;
+  const npx = String.raw`C:\Program Files\nodejs\npx.cmd`;
+  const which = (/** @type {string} */ n) => ({ node, npx })[/** @type {'node'|'npx'} */ (n)] ?? null;
+
+  // A path to an executable, or a name that resolves to one: no shell, real
+  // argv. cmd.exe would split "C:\Program Files" at the space.
+  assert.deepEqual(launchSpec(node, ['server.js', 'a b'], 'win32', which), { command: node, args: ['server.js', 'a b'], shell: false });
+  assert.deepEqual(launchSpec('node', ['a b'], 'win32', which), { command: node, args: ['a b'], shell: false });
+
+  // A shim: through the shell as one finished line, never shell plus argv,
+  // which is what Node flags as DEP0190.
+  const shim = launchSpec('npx', ['-y', '@acme/mcp server'], 'win32', which);
+  assert.equal(shim.shell, true);
+  assert.deepEqual(shim.args, []);
+  assert.ok(shim.command.startsWith(String.raw`C:\Program^ Files\nodejs\npx.cmd `), shim.command);
+
+  // A name nothing on PATH provides is left for cmd.exe to report.
+  assert.equal(launchSpec('nosuchtool', [], 'win32', () => null).shell, true);
+});
+
+test('Windows quoting escapes for the C runtime and for cmd.exe, and twice for a batch file', async () => {
+  const { winQuote } = await import('../src/proxy.js');
+  // Every character cmd.exe interprets, the quotes included, is ^-escaped.
+  assert.equal(winQuote('a b'), '^"a^ b^"');
+  assert.equal(winQuote('x&y|z'), '^"x^&y^|z^"');
+  assert.equal(winQuote('100%PATH%'), '^"100^%PATH^%^"');
+  // A quote is escaped for the C runtime, then its escape for cmd.exe.
+  assert.equal(winQuote('a"b'), String.raw`^"a\^"b^"`);
+  // A trailing backslash is doubled so it cannot escape the closing quote.
+  assert.equal(winQuote(String.raw`C:\dir\ `.trim()), String.raw`^"C:\dir\\^"`);
+  // A batch file re-parses %* through cmd.exe: one more layer of ^.
+  assert.equal(winQuote('a b', true), '^^^"a^^^ b^^^"');
+});
+
+test('hostile arguments reach a real batch shim exactly, run nothing, and raise no DEP0190', { skip: process.platform !== 'win32' }, async () => {
+  const { launchSpec, whichWindows } = await import('../src/proxy.js');
   const { spawnSync } = await import('node:child_process');
 
-  // `node` is a bare name, so it takes the shell path, as `npx` would. The
-  // spawn happens in a child so its stderr, where the warning lands, is ours to read.
-  const spec = launchSpec('node', ['-e', 'process.stdout.write(process.argv[1])', 'two words']);
-  assert.equal(spec.shell, true);
-  const probe =
-    `const r = require('node:child_process').spawnSync(${JSON.stringify(spec.command)}, ` +
-    `${JSON.stringify(spec.args)}, { shell: true, encoding: 'utf8' });` +
-    `process.stdout.write(r.stdout); process.stderr.write(r.stderr);`;
-  const res = spawnSync(process.execPath, ['-e', probe], { encoding: 'utf8' });
-  assert.equal(res.stdout, 'two words', 'a spaced argument must arrive as one argument');
-  assert.doesNotMatch(res.stderr, /DEP0190/);
+  // A shim in a directory with a space in it, like C:\Program Files\nodejs.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pw shim '));
+  fs.writeFileSync(path.join(dir, 'echo.js'), 'process.stdout.write(JSON.stringify(process.argv.slice(2)))');
+  fs.writeFileSync(path.join(dir, 'echoargs.cmd'), '@node "%~dp0echo.js" %*\r\n');
+  const env = { ...process.env, PATH: `${dir};${process.env.PATH}`, PW_SECRET: 'must-not-expand' };
+
+  const args = [
+    'plain', 'a b', 'q"uote', 'x"&echo INJECTED', 'amp&whoami', '%PW_SECRET%', 'caret^', 'bang!',
+    'trail\\', 'dir with space\\', 'lt<gt>', 'paren(x)', '', 'semi;colon', 'a\\"b', 'star*?', 'pipe|x', 'back`tick',
+  ];
+  for (const command of ['echoargs', 'node']) {
+    const argv = command === 'node' ? ['-e', 'process.stdout.write(JSON.stringify(process.argv.slice(1)))', ...args] : args;
+    const spec = launchSpec(command, argv, 'win32', (n) => whichWindows(n, env));
+    assert.equal(spec.shell, command === 'echoargs', `${command} should ${command === 'echoargs' ? '' : 'not '}need a shell`);
+
+    // Spawned from a child so its stderr, where DEP0190 would land, is ours.
+    const probe =
+      `const r = require('node:child_process').spawnSync(${JSON.stringify(spec.command)}, ${JSON.stringify(spec.args)}, ` +
+      `{ shell: ${spec.shell}, encoding: 'utf8', env: ${JSON.stringify(env)} });` +
+      `process.stdout.write(r.stdout); process.stderr.write(r.stderr);`;
+    const res = spawnSync(process.execPath, ['-e', probe], { encoding: 'utf8' });
+    assert.deepEqual(JSON.parse(res.stdout), args, `${command}: arguments must arrive exactly as given`);
+    assert.doesNotMatch(res.stderr, /DEP0190/);
+  }
 });
 
 test('a budget with no metric extractor behind it is reported, not silently inert', async () => {
@@ -573,4 +587,15 @@ test('a budget with no metric extractor behind it is reported, not silently iner
     budgets: [{ id: 'b', match: { target: '*' }, field: 'params.amount', limit: 1 }],
   });
   assert.deepEqual(auditPolicyMetrics(direct, {}), []);
+});
+
+test('trailing slashes are trimmed in linear time', async () => {
+  const { trimSlashes } = await import('../src/remote.js');
+  assert.equal(trimSlashes('https://hub.example///'), 'https://hub.example');
+  assert.equal(trimSlashes('https://hub.example'), 'https://hub.example');
+  assert.equal(trimSlashes('///'), '');
+  const hostile = '/'.repeat(200000) + 'x';
+  const t = performance.now();
+  assert.equal(trimSlashes(hostile), hostile);
+  assert.ok(performance.now() - t < 200, 'a long run of slashes must not be slow');
 });

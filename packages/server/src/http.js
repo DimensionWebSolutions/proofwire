@@ -317,13 +317,21 @@ export function sendHtml(res, status, html, headers = {}) {
  * @returns {Record<string,string>}
  */
 export function parseCookies(header) {
+  // No prototype: a cookie named `__proto__` or `constructor` is just a
+  // cookie, not a way to reach Object.prototype.
   /** @type {Record<string,string>} */
-  const out = {};
+  const out = Object.create(null);
   if (!header) return out;
   for (const part of header.split(';')) {
     const eq = part.indexOf('=');
     if (eq < 1) continue;
-    out[part.slice(0, eq).trim()] = decodeURIComponent(part.slice(eq + 1).trim());
+    let value;
+    try {
+      value = decodeURIComponent(part.slice(eq + 1).trim());
+    } catch {
+      continue; // A malformed %-escape is a broken cookie, not a 500.
+    }
+    out[part.slice(0, eq).trim()] = value;
   }
   return out;
 }

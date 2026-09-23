@@ -26,11 +26,28 @@ release together at the same version.
   `scripts/repo-hygiene.mjs` blocks keys, salts, environment and database files,
   and token-shaped strings in CI and in the release preflight.
 
+- **Windows: an argument could break out of its quotes and run a second
+  command.** The quoting escaped `"` for the program but not for cmd.exe, which
+  ignores backslash escapes, so `x"&echo PWNED` ran `echo`. The arguments come
+  from the operator's own config, so this was not reachable remotely, but an
+  argument ending in `\` was also silently merged with the next one.
+  `pw proxy` now resolves the command first: an `.exe` runs directly with no
+  shell at all, and a `.cmd`/`.bat` shim gets every argument escaped for the C
+  runtime and for cmd.exe (twice for a shim, which re-parses `%*`). `%VAR%` in
+  an argument is no longer expanded. The release script uses the same code.
+  Found by CodeQL.
+- **Smaller hardening from the first CodeQL scan:** the hub's cookie parser
+  ignores `__proto__` and skips malformed escapes instead of failing the
+  request; URL trailing-slash trimming no longer uses a regex with quadratic
+  backtracking; `pw init` creates its files exclusively (`wx`) instead of
+  check-then-write; the dashboard checks and reads a file through one handle;
+  unused imports removed.
+
 ### Fixed
 
 - **`pw proxy` no longer triggers Node's DEP0190 warning on Windows** when it
-  wraps a bare command such as `npx` or `node`. The shell now gets one
-  already-quoted command line with no separate args. Quoting is unchanged.
+  wraps a bare command such as `npx`. A shim now gets one finished command line
+  with no separate args, and an executable no longer goes through a shell.
 
 ### Changed
 
