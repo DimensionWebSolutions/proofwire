@@ -240,10 +240,12 @@ Publish the repo and the npm package. **No hosted service, so no customer data
 and no liability.** Every claim in the README is checkable by the person
 reading it.
 
-- [ ] Repo public, `npm publish` the CLI
-- [ ] `docs/THREAT-MODEL.md` prominent — leading with limits is the credibility play
+- [x] Repo public, `npm publish` the CLI (`proofwire` and `@proof_wire/*` on npm)
+- [x] `docs/THREAT-MODEL.md` prominent — leading with limits is the credibility play
+      (linked from the site's hero and footer, and from the README's limits section)
 - [ ] Launch posts: *"Your agent's audit log is a text file"* → *"We attacked our own log four ways"*
-- [ ] CI running the full suite on every push
+- [x] CI running the full suite on every push (Windows, macOS, Linux; Node 20–24;
+      Docker end to end; CodeQL)
 
 **Success looks like:** HN front page, stars, and — more important — people
 actually running `pw verify`. Track that.
