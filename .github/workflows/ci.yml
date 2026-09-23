@@ -236,7 +236,8 @@ jobs:
           $pw init
           printf '%s\n' '{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"query","arguments":{"sql":"SELECT 1"}}}' |
             $pw proxy --no-remote -- node "$GITHUB_WORKSPACE/examples/fake-mcp-server.js" > /dev/null
-          $pw remote add --name witness --url https://localhost --token "$token"
+          $pw remote add --name witness --url https://localhost --token "$token" | tee add.out
+          grep -q 'A witness key' add.out
           $pw cosign --remote witness
           $pw export evidence.json
           pin="$(node -e "const j=require(process.argv[1]); process.stdout.write(j.witness.kid+'='+j.witness.publicKey)" "$RUNNER_TEMP/identity.json")"

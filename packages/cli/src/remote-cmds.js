@@ -161,7 +161,10 @@ export async function cmdRemote(args) {
       ['stored', CRED_FILE],
     ]);
     out('');
-    if (!who.scopes.includes('receipts:write')) {
+    if (who.scopes.includes('witness:sign') && !who.scopes.includes('receipts:write')) {
+      info(`A witness key: it co-signs this log's checkpoints with ${c.cyan(`pw cosign --remote ${name}`)}.`);
+      out('');
+    } else if (!who.scopes.includes('receipts:write')) {
       warn('This key cannot push receipts. That is right for an auditor, wrong for an agent.');
       out('');
     }
