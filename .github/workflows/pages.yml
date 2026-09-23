@@ -7,7 +7,9 @@ name: Pages
 on:
   push:
     branches: [main]
-    paths: ['site/**', '.github/workflows/pages.yml']
+    # witnesses/keys.json is published on the site too, so a change to the
+    # record must redeploy it rather than wait for the next site edit.
+    paths: ['site/**', 'witnesses/keys.json', '.github/workflows/pages.yml']
   # release.json is written at deploy time, so publishing to npm should refresh
   # it: the install line appears by itself once the packages exist.
   workflow_run:
@@ -64,6 +66,10 @@ jobs:
           mkdir _site
           cp -r site/. _site/
           rm -rf _site/test
+          # The published witness key record, served from this origin so the
+          # page can show it under its own Content-Security-Policy. One source
+          # of truth: it is copied, never kept as a second file in site/.
+          cp witnesses/keys.json _site/witness-keys.json
 
       - uses: actions/configure-pages@v5
 

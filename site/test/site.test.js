@@ -26,6 +26,18 @@ const attrs = (html, name) => [...html.matchAll(new RegExp(`\\s${name}="([^"]*)"
 const isExternal = (u) => /^(https?:)?\/\//i.test(u);
 const isRelative = (u) => !isExternal(u) && !u.startsWith('/') && !u.startsWith('#') && !/^[a-z][a-z0-9+.-]*:/i.test(u);
 
+/**
+ * Files the page fetches that are not in site/ but copied in when Pages
+ * deploys, published path → source in the repository. Kept to a list someone
+ * has to edit on purpose: anything else the page references must be in site/.
+ */
+const DEPLOYED = {
+  'witness-keys.json': 'witnesses/keys.json',
+};
+
+/** Where a referenced file comes from, relative to the repository root. */
+const sourceOf = (file) => DEPLOYED[file] ?? `site/${file}`;
+
 /** Every file the page pulls in, as paths under site/. */
 function referencedFiles() {
   const refs = [
@@ -40,18 +52,33 @@ function referencedFiles() {
 test('every relative reference resolves to a file that is published', () => {
   const files = referencedFiles();
   assert.ok(files.length >= 6, `expected to find the page's own assets, found ${files.length}`);
-  for (const file of files) assert.ok(existsSync(path.join(SITE, file)), `${file} does not exist under site/`);
+  for (const file of files) {
+    assert.ok(existsSync(path.join(ROOT, sourceOf(file))), `${file} does not exist (looked for ${sourceOf(file)})`);
+  }
+});
+
+test('files copied in at deploy time are copied in, and redeploy when they change', () => {
+  const pages = readFileSync(path.join(ROOT, '.github/workflows/pages.yml'), 'utf8');
+  for (const [published, source] of Object.entries(DEPLOYED)) {
+    assert.ok(referencedFiles().includes(published), `${published} is listed as deployed but the page never fetches it`);
+    assert.ok(
+      pages.includes(`cp ${source} _site/${published}`),
+      `pages.yml does not copy ${source} to ${published}, so the deployed page would 404 on it`,
+    );
+    assert.ok(pages.includes(`'${source}'`), `pages.yml does not redeploy when ${source} changes`);
+  }
 });
 
 test('everything the page references is tracked by git, not merely present on this machine', (t) => {
   // .gitignore has `*.bundle.json`, so the sample bundle sat on disk, every test
   // passed here, and the first place anyone found out was a red CI run — with a
   // deployed page whose sample would have 404ed. This is where it should show.
-  const git = spawnSync('git', ['ls-files', '--', 'site'], { cwd: ROOT, encoding: 'utf8' });
+  const git = spawnSync('git', ['ls-files', '--', 'site', ...Object.values(DEPLOYED)], { cwd: ROOT, encoding: 'utf8' });
   if (git.error || git.status !== 0 || !git.stdout.trim()) return t.skip('not a git checkout');
   const tracked = new Set(git.stdout.split('\n').map((f) => f.trim()));
   for (const file of new Set(referencedFiles())) {
-    assert.ok(tracked.has(`site/${file}`), `site/${file} exists but git does not track it — check .gitignore (git check-ignore -v site/${file})`);
+    const source = sourceOf(file);
+    assert.ok(tracked.has(source), `${source} exists but git does not track it — check .gitignore (git check-ignore -v ${source})`);
   }
 });
 

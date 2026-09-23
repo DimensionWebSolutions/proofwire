@@ -420,6 +420,75 @@ fetch('release.json')
   })
   .catch(() => {});
 
+// Proofwire's own witness keys. `witness-keys.json` is witnesses/keys.json,
+// copied in at deploy time and served from this origin — but read like any
+// other input here: shown as text, never parsed as markup.
+fetch('witness-keys.json')
+  .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+  .then(showWitnessKeys)
+  .catch(() => {
+    // The page already links the record itself, just below.
+    $('witness-keys-status').textContent =
+      'The record could not be loaded here — it is in the repository, linked below.';
+  });
+
+/** @param {unknown} record */
+function showWitnessKeys(record) {
+  const entries = Array.isArray(record)
+    ? record.filter((e) => e && typeof e.kid === 'string' && typeof e.publicKey === 'string')
+    : [];
+  if (!entries.length) {
+    // The honest empty state. A key for a witness that isn't running would be
+    // worse than none: an auditor would pin something nobody operates.
+    $('witness-keys-status').textContent =
+      'None yet. Proofwire does not run a witness yet, so there is no key of ours to pin — and this page will not show one until there is.';
+    return;
+  }
+
+  // Revoked keys stay listed — the record is append-only — but are never pinned.
+  const pinnable = entries.filter((e) => !e.revokedAt);
+  $('witness-keys-status').textContent =
+    `${entries.length} key${entries.length === 1 ? '' : 's'} published; ${pinnable.length} to pin. ` +
+    'A retired key stopped signing but what it signed stays good, so it is still pinned; a revoked one never is.';
+
+  fill($('witness-key-list'), entries.map((e) => {
+    const state = e.revokedAt ? 'revoked' : e.retiredAt ? 'retired' : 'active';
+    const label = e.revokedAt
+      ? `revoked ${String(e.revokedAt)} — do not pin`
+      : e.retiredAt ? `retired ${String(e.retiredAt)} — still pinned` : 'active';
+    const meta = [e.operator, e.node, e.addedAt ? `added ${e.addedAt}` : null]
+      .filter((x) => typeof x === 'string' && x).join(' · ');
+    return el('li', { class: `wkey ${state}` },
+      el('div', { class: 'wkey-head' },
+        el('span', { class: 'wkey-kid', text: e.kid }),
+        el('span', { class: 'wkey-state', text: label })),
+      meta ? el('p', { class: 'wkey-meta', text: meta }) : null,
+      el('code', { class: 'wkey-pub', text: e.publicKey }),
+      typeof e.note === 'string' && e.note ? el('p', { class: 'wkey-meta', text: e.note }) : null,
+    );
+  }));
+  $('witness-key-list').hidden = false;
+
+  if (!pinnable.length) return;
+  const button = $('pin-proofwire');
+  button.hidden = false;
+  button.addEventListener('click', () => {
+    // Added to whatever is already there, never replacing it: someone pinning
+    // their own auditor's witness should not lose it by clicking this.
+    const have = readTrusted() ?? {};
+    const add = pinnable.filter((e) => have[e.kid] !== e.publicKey);
+    if (add.length) {
+      $('trusted').value = [
+        $('trusted').value.trim(),
+        '# Proofwire, from witnesses/keys.json',
+        ...add.map((e) => `${e.kid} ${e.publicKey}`),
+      ].filter(Boolean).join('\n');
+    }
+    $('trust-details').open = true;
+    run();
+  });
+}
+
 // The hero transcript resolves once on load, starting from a fully visible
 // resting state: without this script, or with reduced motion, it is all there.
 (function stage() {

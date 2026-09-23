@@ -206,6 +206,22 @@
   .prop p { margin: 0; font-size: .92rem; line-height: 1.55; color: var(--ink-2); }
   .prop p strong { color: var(--ink); }
 
+  /* ── witness keys ── */
+  .wkeys { margin-top: 30px; }
+  .wkeys h3 { margin-bottom: 8px; }
+  .wkeys p { font-size: .95rem; color: var(--ink-2); }
+  .wkeys-note { font-size: .86rem !important; color: var(--ink-3) !important; }
+  .wkey-list { list-style: none; margin: 14px 0; padding: 0; display: grid; gap: 10px; }
+  .wkey { background: var(--paper); border: 1px solid var(--rule); border-radius: 4px; padding: 14px 16px; }
+  .wkey.revoked { border-color: color-mix(in srgb, var(--alarm) 55%, var(--rule)); }
+  .wkey-head { display: flex; flex-wrap: wrap; gap: 6px 14px; align-items: baseline; }
+  .wkey-kid { font-family: var(--mono); font-size: .8rem; color: var(--ink); overflow-wrap: anywhere; }
+  .wkey-state { font-family: var(--mono); font-size: .68rem; letter-spacing: .06em; text-transform: uppercase; color: var(--verify); }
+  .wkey.retired .wkey-state { color: var(--hold); }
+  .wkey.revoked .wkey-state { color: var(--alarm); }
+  .wkey-meta { margin: 6px 0 0; font-size: .82rem; color: var(--ink-3); }
+  .wkey-pub { display: block; margin-top: 6px; font-family: var(--mono); font-size: .74rem; color: var(--ink-2); overflow-wrap: anywhere; }
+
   /* ── pricing ── */
   .tiers { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; margin-top: 28px; }
   @media (min-width: 700px) { .tiers { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -379,6 +395,7 @@
           <label for="trusted">Witness keys you trust</label>
           <textarea id="trusted" spellcheck="false" autocomplete="off" placeholder="pw1… &lt;public key&gt;&#10;pw1… &lt;public key&gt;"></textarea>
           <small>One per line, <span style="font-family:var(--mono)">kid publicKey</span>, from the witness operators — never from the bundle.</small>
+          <button class="btn-sm" type="button" id="pin-proofwire" hidden style="margin-top:8px">Add Proofwire's witness keys</button>
         </div>
         <div>
           <label for="min-witnesses">Require at least</label>
@@ -602,6 +619,21 @@ $ pw proxy --namespace crm -- npx -y @acme/mcp-crm
     <div class="prop"><span class="k">approvals inbox</span><p><strong>Escalations reach a human.</strong> Undecided requests expire into a <em>denial</em> — never into an approval. Reviewers see redacted arguments.</p></div>
     <div class="prop"><span class="k">tenant isolation</span><p><strong>Every row names its organisation.</strong> A credential cannot reach another tenant's data by any route, including by guessing an id — and agent keys are pinned to a single log.</p></div>
     <div class="prop"><span class="k">keys out of the database</span><p><strong>A KMS or HSM can hold them.</strong> Signing goes through a three-member interface, so a misconfigured signer disables signing rather than quietly falling back to a local key.</p></div>
+  </div>
+
+  <div class="wkeys" id="witness-keys">
+    <h3>Proofwire's witness keys</h3>
+    <p class="measure" id="witness-keys-status">Loading the published record…</p>
+    <ul class="wkey-list" id="witness-key-list" hidden></ul>
+    <p class="measure wkeys-note">
+      This page is served by Proofwire, so it is not what makes these keys trustworthy. The
+      <a href="https://github.com/proofwire/proofwire/blob/main/witnesses/keys.json">record</a> is
+      append-only and every change is a public commit — its
+      <a href="https://github.com/proofwire/proofwire/commits/main/witnesses/keys.json">history</a>
+      is what shows a key was never quietly swapped. Pin from a commit you trust, as the
+      <a href="https://github.com/proofwire/proofwire/blob/main/witnesses/README.md">record's README</a>
+      explains. And a Proofwire witness is redundancy, not independence, for a log Proofwire also hosts.
+    </p>
   </div>
 </section>
 

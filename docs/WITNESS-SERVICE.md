@@ -109,8 +109,10 @@ enforced rather than promised: `scripts/witness-record.test.mjs` replays every
 commit of the file on every CI run, and an entry may only ever gain a
 `retiredAt` (stopped signing; still pinned) or a `revokedAt` (never trust; `pw
 check --witness-keys` skips it). Each entry's `kid` must derive from its key.
-`pw check --witness-keys witnesses/keys.json` reads it directly. Still to do:
-showing it on the site, and Rekor.
+`pw check --witness-keys witnesses/keys.json` reads it directly. The site
+shows it too (copied in at deploy, so there's one source), with an "add
+Proofwire's witness keys" button in the verifier that never pins a revoked
+key. Still to do: Rekor, once there's a real key to submit.
 
 ### 4. Billing and metering
 
