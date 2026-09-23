@@ -262,7 +262,8 @@ their own keys and accept their own risk knowingly).
       objection entirely, and it is the single highest-leverage adoption fix.
       `pw proxy --monitor`; see README, "Try a policy before it can block
       anything"
-- [ ] Weekly contact with every partner
+- [ ] Weekly contact with every partner. The month-long plan and the weekly
+      questions are in [`PARTNERS.md`](PARTNERS.md).
 
 **This is where you learn whether anyone verifies anything.** If no auditor
 ever runs `pw check`, the premise is wrong and better to know now.

@@ -36,7 +36,7 @@ Out of scope unless you want to: the console, the CLI, the policy engine
 
 ```bash
 npm install          # zero external dependencies; installs 5 workspace links
-npm test             # 308 tests
+npm test             # 400+ tests
 node --no-warnings=ExperimentalWarning packages/server/test/load.js
 npm run demo         # attacks a real log four ways
 ```

@@ -404,7 +404,7 @@ not ready for production.
 ## Status
 
 `0.3.0` — cryptography, policy engine, proxy, CLI, and the multi-tenant hub are
-complete and covered by **308 tests**: the published RFC 6962 Certificate
+complete and covered by **400+ tests**: the published RFC 6962 Certificate
 Transparency reference tree and RFC 8032 Ed25519 vectors, exhaustive Merkle
 proof verification for every tree size up to 128 and every `(m, n)` consistency
 pair up to 48, and end-to-end tests that run a real agent through a real proxy
@@ -421,6 +421,13 @@ receipt on disk, and **zero external dependencies**. Reproduce with
 
 Wire format and policy schema are versioned (`"v": 1`) and will be migrated,
 not broken.
+
+**Guides:** [trying it on real agents](docs/PARTNERS.md) ·
+[deploying a hub or witness](docs/DEPLOY.md) ·
+[Slack approvals](docs/SLACK.md) ·
+[evidence packs for auditors](docs/EVIDENCE.md) ·
+[the hub](docs/HUB.md) ·
+[threat model](docs/THREAT-MODEL.md)
 
 ## License
 
