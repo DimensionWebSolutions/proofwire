@@ -5,7 +5,7 @@
 # small and, more to the point, keeps the supply chain of a process that holds
 # other companies' audit trails down to Node itself.
 
-FROM node:24-alpine
+FROM node:25-alpine
 
 # Run as a non-root user. The only writable path the hub needs is its data
 # directory, and it should not be able to modify its own code at runtime.
