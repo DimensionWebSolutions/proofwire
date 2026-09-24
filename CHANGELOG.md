@@ -44,6 +44,10 @@ release together at the same version.
 
 ### Fixed
 
+- **A checkpoint of an empty log no longer fails bundle verification.**
+  `verifyBundle`, in the CLI and in the website's verifier, compared a size-0
+  checkpoint against no root at all and reported "history was rewritten", a
+  false tampering alarm. Found while writing the Python SDK.
 - **`pw proxy` no longer triggers Node's DEP0190 warning on Windows** when it
   wraps a bare command such as `npx`. A shim now gets one finished command line
   with no separate args, and an executable no longer goes through a shell.
@@ -56,6 +60,18 @@ release together at the same version.
 
 ### Added
 
+- **A Python SDK, `proof-wire`** ([`sdk/python`](sdk/python/README.md)), imported as
+  `proof_wire`. It writes and verifies exactly the format the CLI reads: a log
+  written in Python passes `pw verify`, its bundles pass `pw check`, and logs
+  and bundles from the JavaScript side verify in Python and can be continued
+  there. `Recorder` wraps a Python agent's tools (decorator, async, or context
+  manager) with the proxy's intent and outcome receipts, redaction and sealed
+  arguments, plus an optional `decide` hook that refuses calls before they
+  run. `verify_bundle`, `push` to a hub, checkpoints and witnesses are all
+  there too. Tested against the RFC 6962 and RFC 8032 vectors, and in CI
+  against the real CLI on Linux and Windows with Python 3.9 and 3.13, including
+  byte-level canonicalization parity over hundreds of awkward values. One
+  dependency: `cryptography`.
 - **Single sign-on with OpenID Connect** ([`docs/SSO.md`](docs/SSO.md)), for Okta,
   Microsoft Entra ID, Google Workspace or any OIDC provider. Authorization code
   flow with PKCE and a browser-bound, single-use state; ID tokens verified in

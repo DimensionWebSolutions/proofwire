@@ -29,3 +29,12 @@ credentials.json
 
 # Local tooling
 .claude/
+
+# Python SDK
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+*.egg-info/
+sdk/python/dist/
+sdk/python/build/

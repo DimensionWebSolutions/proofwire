@@ -481,6 +481,22 @@ test('an empty log exports a bundle that verifies, and a forged empty head does 
   assert.equal(verifyBundle(bundle).ok, false);
 });
 
+test('a checkpoint of the empty log is not mistaken for a rewritten history', () => {
+  // Found by the Python port: the size-0 checkpoint was compared against no
+  // prefix root at all, and every such bundle "failed".
+  const log = ProofLog.create(tmpdir());
+  log.checkpoint();
+  fill(log, 3);
+  log.checkpoint();
+  const res = verifyBundle(JSON.parse(JSON.stringify(log.bundle())));
+  assert.ok(res.ok, JSON.stringify(res.issues));
+
+  // And a size-0 checkpoint naming some other root is still caught.
+  const forged = JSON.parse(JSON.stringify(log.bundle()));
+  forged.checkpoints[0].body.root = 'cd'.repeat(32);
+  assert.equal(verifyBundle(forged).ok, false);
+});
+
 // ── witnesses have to be the verifier's, not the bundle's ────────────────
 
 /**

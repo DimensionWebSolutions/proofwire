@@ -66,6 +66,31 @@ jobs:
       - name: Core and proxy only
         run: node --test packages/core/test/*.test.js packages/proxy/test/*.test.js
 
+  python-sdk:
+    # The Python SDK against its own tests and, with Node present, against the
+    # real CLI and core in both directions: a log Python wrote must pass
+    # `pw verify` and `pw check`, and one JavaScript wrote must verify in
+    # Python. 3.9 is the oldest version the package claims.
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python: ['3.9', '3.13']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: ${{ matrix.python }}
+      - run: npm install --no-audit --no-fund
+      - run: python -m pip install --disable-pip-version-check ./sdk/python[test]
+      - name: Tests, including interop with the CLI
+        working-directory: sdk/python
+        run: python -B -m pytest -q -p no:cacheprovider
+
   verify-own-log:
     # Proofwire's own repository keeps a Proofwire log. If the project cannot
     # keep its own evidence intact, nothing else here is worth believing.

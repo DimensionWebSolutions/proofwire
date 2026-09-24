@@ -423,6 +423,7 @@ Wire format and policy schema are versioned (`"v": 1`) and will be migrated,
 not broken.
 
 **Guides:** [trying it on real agents](docs/PARTNERS.md) ·
+[Python SDK](sdk/python/README.md) ·
 [deploying a hub or witness](docs/DEPLOY.md) ·
 [Slack approvals](docs/SLACK.md) ·
 [single sign-on](docs/SSO.md) ·

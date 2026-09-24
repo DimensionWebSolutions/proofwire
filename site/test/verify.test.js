@@ -533,6 +533,12 @@ test('an empty log exports a bundle both verify, and a forged head is rejected',
   assert.equal((await agree(bundle, {}, 'empty, forged head')).w.ok, false);
 });
 
+test('a checkpoint of the empty log verifies in both, rather than looking like a rewrite', async () => {
+  const log = ProofLog.create(fs.mkdtempSync(path.join(os.tmpdir(), 'pw-site-cp0-')));
+  log.checkpoint();
+  assert.equal((await agree(clone(log.bundle()), {}, 'checkpointed while empty')).w.ok, true);
+});
+
 test('random mutations agree on the witness path too', async () => {
   const paths = leafPaths(SAMPLE);
   const opts = { minWitnesses: 1, trustedWitnesses: WITNESS_KEYS };

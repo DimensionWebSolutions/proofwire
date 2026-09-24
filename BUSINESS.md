@@ -211,6 +211,8 @@ Listed because a plan without this section is marketing.
    make for you.
 2. **Python SDK** — most agent frameworks are Python; the proxy covers MCP but
    the library needs to meet people where they are.
+   *Built:* `sdk/python` (`pip install proof-wire`), wire-compatible with the
+   CLI in both directions, tested against it in CI.
 3. **Monitor-only mode** — removes the adoption objection entirely.
    *Built:* `pw proxy --monitor`. Receipts record what the policy would have
    done without claiming it did.

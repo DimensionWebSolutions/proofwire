@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "proof-wire"
+version = "0.4.0"
+description = "Tamper-evident receipts for AI agent actions. Python SDK, wire-compatible with the proofwire CLI."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { text = "Apache-2.0" }
+authors = [{ name = "IdeaboticsAI" }]
+keywords = ["ai-agents", "audit", "transparency-log", "merkle", "ed25519", "eu-ai-act"]
+classifiers = [
+  "Development Status :: 4 - Beta",
+  "Intended Audience :: Developers",
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Security :: Cryptography",
+  "Topic :: System :: Logging",
+]
+# One dependency, for Ed25519: the standard library has none, and signature
+# code is the last thing a security product should write itself.
+dependencies = ["cryptography>=41"]
+
+[project.optional-dependencies]
+test = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/proofwire/proofwire"
+Source = "https://github.com/proofwire/proofwire/tree/main/sdk/python"
+Issues = "https://github.com/proofwire/proofwire/issues"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+proof_wire = ["py.typed"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+testpaths = ["tests"]

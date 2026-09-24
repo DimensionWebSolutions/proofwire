@@ -522,6 +522,9 @@ async function verifyBundleUnchecked(bundle, opts = {}) {
       const tree = new Accumulator();
       /** @type {Map<number, string>} */
       const prefixRoots = new Map();
+      // A checkpoint of the empty log names the empty root; without this it
+      // was compared against nothing and reported as a rewritten history.
+      if (wanted.has(0)) prefixRoots.set(0, hex(await tree.root()));
       for (const [k, leaf] of leaves.entries()) {
         await tree.append(leaf);
         if (wanted.has(k + 1)) prefixRoots.set(k + 1, hex(await tree.root()));

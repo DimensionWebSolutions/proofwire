@@ -175,6 +175,36 @@ worth knowing:
 A custom domain later is Settings → Pages → Custom domain; nothing in the site
 needs to change.
 
+## The Python SDK (PyPI)
+
+The Python package lives in `sdk/python`. It's published as **`proof-wire`**
+and imported as `proof_wire`. The name `proofwire` on PyPI belongs to an
+unrelated project, and the underscore form mirrors the npm scope
+`@proof_wire`.
+
+**Once:** create an account at <https://pypi.org>, turn on two-factor
+authentication, and create an API token scoped to all projects. After the first
+upload, replace it with one scoped to `proof-wire` only.
+
+**Each release**, from the repository root, with the version in
+`sdk/python/pyproject.toml` and `sdk/python/src/proof_wire/__init__.py`
+matching the npm release:
+
+```bash
+cd sdk/python
+python -m pip install --upgrade build twine
+python -m build                      # sdist and wheel into dist/
+python -m twine check dist/*
+python -m twine upload dist/*        # asks for the token; username __token__
+```
+
+Check it installs cleanly:
+
+```bash
+python -m venv /tmp/pwcheck && /tmp/pwcheck/bin/pip install proof-wire
+/tmp/pwcheck/bin/python -c "import proof_wire; print(proof_wire.__version__)"
+```
+
 ## Versioning
 
 All five packages release at the same version; preflight enforces it. The wire

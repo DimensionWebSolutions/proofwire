@@ -594,7 +594,10 @@ function verifyBundleUnchecked(bundle, opts = {}) {
       );
       const tree = new MerkleTree();
       /** @type {Map<number, string>} */
-      const prefixRoots = new Map();
+      // A checkpoint of the empty log is legitimate and names the empty root.
+      // Without this entry it was compared against nothing and reported as a
+      // rewritten history: a false tampering alarm.
+      const prefixRoots = new Map(wanted.has(0) ? [[0, hex(new MerkleTree().root)]] : []);
       leaves.forEach((leaf, k) => {
         tree.append(leaf);
         if (wanted.has(k + 1)) prefixRoots.set(k + 1, hex(tree.root));
