@@ -417,7 +417,7 @@ npm test
 Measured on a 4-core laptop: 2,300 receipts/s ingested, 9,500 inclusion
 proofs/s, 109 ms to export 4,000 receipts as a verifiable bundle, 2.5 KB per
 receipt on disk, and **zero external dependencies**. Reproduce with
-`node packages/server/test/load.js`.
+`node packages/server/bench/load.js`.
 
 Wire format and policy schema are versioned (`"v": 1`) and will be migrated,
 not broken.

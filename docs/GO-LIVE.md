@@ -16,7 +16,7 @@ cannot ship a readiness assessment that asks you to take its word for it.
 
 ## What was actually measured
 
-Run `node --no-warnings=ExperimentalWarning packages/server/test/load.js` to
+Run `node --no-warnings=ExperimentalWarning packages/server/bench/load.js` to
 reproduce. Numbers below are from a 4-core i5-10210U laptop — a floor, not a
 ceiling, and a server will be several times better.
 

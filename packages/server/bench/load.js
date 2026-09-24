@@ -6,7 +6,7 @@
  * planning is arithmetic rather than optimism. Run it before claiming the hub
  * is ready for anyone's production traffic:
  *
- *     node --no-warnings=ExperimentalWarning packages/server/test/load.js
+ *     node --no-warnings=ExperimentalWarning packages/server/bench/load.js
  */
 
 import fs from 'node:fs';

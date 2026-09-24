@@ -93,7 +93,7 @@ jobs:
           node-version: '24'
       - run: npm install --no-audit --no-fund
       - name: Load profile
-        run: node --no-warnings=ExperimentalWarning packages/server/test/load.js
+        run: node --no-warnings=ExperimentalWarning packages/server/bench/load.js
 
   docker:
     # A `docker build` that succeeds says nothing about whether the image
