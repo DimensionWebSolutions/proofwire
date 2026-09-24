@@ -43,6 +43,19 @@ export function compareVersions(a, b) {
 }
 
 /**
+ * Whether the CHANGELOG has a heading for exactly this version, as in
+ * "## 0.4.0 — 2026-09-25". A line comparison, not a regex built from the
+ * version, so nothing in the version is ever read as pattern syntax.
+ *
+ * @param {string} log
+ * @param {string} version
+ */
+export function hasSection(log, version) {
+  const heading = `## ${version}`;
+  return log.split(/\r?\n/).some((line) => line === heading || line.startsWith(`${heading} `));
+}
+
+/**
  * @param {string} file
  * @param {(json: any) => void} change
  */
@@ -85,7 +98,7 @@ export function bumpFiles(root, version, date) {
 
   const changelog = path.join(root, 'CHANGELOG.md');
   const log = fs.readFileSync(changelog, 'utf8');
-  if (new RegExp(`^## ${version.replace(/\./g, '\\.')}\\b`, 'm').test(log)) {
+  if (hasSection(log, version)) {
     throw new Error(`CHANGELOG.md already has a ${version} section`);
   }
   const unreleased = /^## Unreleased[ \t]*\r?\n([\s\S]*?)(?=^## )/m.exec(log);
@@ -149,7 +162,7 @@ export function versionProblems(root) {
   }
 
   const log = fs.readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8');
-  if (!new RegExp(`^## ${version.replace(/\./g, '\\.')}\\b`, 'm').test(log)) {
+  if (!hasSection(log, version)) {
     problems.push(`CHANGELOG.md has no "## ${version}" section`);
   }
 

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { bumpFiles, versionProblems, compareVersions, PACKAGES } from './bump.mjs';
+import { bumpFiles, versionProblems, compareVersions, hasSection, PACKAGES } from './bump.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -77,6 +77,15 @@ test('the release preflight names each kind of mismatch', () => {
   const problems = versionProblems(dir).problems.join('\n');
   assert.match(problems, /depends on @proof_wire\/core@0\.0\.1/);
   assert.match(problems, /Python SDK/);
+});
+
+test('a CHANGELOG section is matched by its exact version, nothing near it', () => {
+  const log = '# Changelog\n\n## Unreleased\n\n## 0.4.0 — 2026-09-25\n\n## 0.40.1 — 2030-01-01\n## 1.0.0\r\n';
+  assert.ok(hasSection(log, '0.4.0'));
+  assert.ok(hasSection(log, '1.0.0'), 'a bare heading, with CRLF, counts');
+  assert.equal(hasSection(log, '0.4'), false);
+  assert.equal(hasSection(log, '0.40'), false);
+  assert.equal(hasSection(log, '0x4y0'), false, 'dots are not wildcards');
 });
 
 test('versions compare numerically, not as text', () => {
