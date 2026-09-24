@@ -4,6 +4,7 @@ name: proofwire
 # alert there is the test doing its job.
 paths-ignore:
   - '**/test/**'
+  - '**/tests/**'
   - 'scripts/*.test.mjs'
 
 query-filters:

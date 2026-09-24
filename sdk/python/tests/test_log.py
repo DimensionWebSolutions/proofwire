@@ -51,7 +51,8 @@ def test_editing_an_entry_on_disk_is_caught(log):
     fill(log, 3)
     p = log.dir / "entries.jsonl"
     p.write_bytes(p.read_bytes().replace(b"ord_1", b"ord_9"))
-    assert not ProofLog.open(log.dir).audit()["ok"]
+    audit = ProofLog.open(log.dir).audit()
+    assert not audit["ok"]
 
 
 def test_deleting_an_entry_on_disk_is_caught(log):
@@ -125,7 +126,8 @@ def test_shredding_makes_payloads_unprovable_and_the_log_still_verifies(log):
     assert log.shred(lambda r: r["seq"] == 1) == 1
     assert not log.reveal(1, "params", {"order": "ord_1", "card": "4242 4242 4242 4242"})
     assert log.reveal(0, "params", {"order": "ord_0", "card": "4242 4242 4242 4242"})
-    assert ProofLog.open(log.dir).audit()["ok"]
+    audit = ProofLog.open(log.dir).audit()
+    assert audit["ok"]
 
 
 def test_a_receipt_resigned_by_another_key_is_caught_by_its_signature(log):
