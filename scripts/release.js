@@ -5,6 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { binProblems } from './check-bins.mjs';
 import { hygieneProblems, trackedFiles } from './repo-hygiene.mjs';
+import { versionProblems } from './bump.mjs';
 import { launchSpec } from '../packages/proxy/src/proxy.js';
 
 /**
@@ -71,6 +72,12 @@ function run(cmd, args, opts = {}) {
 
   const spec = launchSpec(cmd, args);
   return execFileSync(spec.command, spec.args, { ...common, shell: spec.shell });
+}
+
+/** @param {string} v  e.g. 0.4.0 → 0.4.1 */
+function nextPatch(v) {
+  const [a, b, c] = v.split('.').map(Number);
+  return `${a}.${b}.${c + 1}`;
 }
 
 /** @param {string} rel */
@@ -147,6 +154,27 @@ function preflight() {
     blocking.push('All packages should release at the same version.');
   } else {
     console.log(`  ${GREEN('✓')} vers   all at ${B([...versions][0])}`);
+  }
+
+  // 4b. The version belongs to this release: pins, CHANGELOG and the Python
+  //     SDK agree, and it isn't one already on the registry. Without this,
+  //     forgetting to bump quietly "re-released" the last version by skipping
+  //     every package.
+  const { version, problems } = versionProblems(ROOT);
+  for (const p of problems) {
+    console.log(`  ${RED('✗')} vers   ${p}`);
+  }
+  if (problems.length) {
+    blocking.push(`Fix the version files. \`npm run bump -- <new version>\` sets them all at once.`);
+  }
+  const published = ORDER.filter((r) => alreadyPublished(manifest(r).name, version));
+  if (published.length === ORDER.length) {
+    console.log(`  ${RED('✗')} npm    ${version} is already published, every package of it`);
+    blocking.push(`${version} is out already. Bump to the next version first:  npm run bump -- ${nextPatch(version)}`);
+  } else if (published.length) {
+    console.log(`  ${YELLOW('!')} npm    ${published.length} of ${ORDER.length} packages already at ${version}; the rest will be published`);
+  } else {
+    console.log(`  ${GREEN('✓')} npm    ${version} is not on the registry yet`);
   }
 
   // 5. Executables that will actually run where they are installed.

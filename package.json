@@ -1,6 +1,6 @@
 {
   "name": "proofwire-monorepo",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "description": "Proofwire — tamper-evident, independently verifiable receipts for AI agent actions.",
@@ -21,7 +21,8 @@
     "pw": "node packages/cli/src/bin.js",
     "hub": "node --no-warnings=ExperimentalWarning packages/server/src/bin.js",
     "release": "node scripts/release.js",
-    "release:dry": "node scripts/release.js --dry-run"
+    "release:dry": "node scripts/release.js --dry-run",
+    "bump": "node scripts/bump.mjs"
   },
   "repository": {
     "type": "git",

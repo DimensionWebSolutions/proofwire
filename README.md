@@ -403,7 +403,7 @@ not ready for production.
 
 ## Status
 
-`0.3.0` — cryptography, policy engine, proxy, CLI, and the multi-tenant hub are
+Cryptography, policy engine, proxy, CLI, the multi-tenant hub and the Python SDK are
 complete and covered by **400+ tests**: the published RFC 6962 Certificate
 Transparency reference tree and RFC 8032 Ed25519 vectors, exhaustive Merkle
 proof verification for every tree size up to 128 and every `(m, n)` consistency

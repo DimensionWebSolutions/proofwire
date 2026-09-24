@@ -477,7 +477,7 @@ so re-run `pw push` from each to refill the gap.
 
 ### Scaling
 
-`0.3.0` is single-writer per process. SQLite in WAL mode handles concurrent
+The hub is single-writer per process. SQLite in WAL mode handles concurrent
 readers comfortably, and ingest is a few hundred microseconds of verification
 plus one transaction. For more than one hub process, shard by organisation —
 each log has exactly one writer by design, so sharding is natural and needs no
@@ -573,7 +573,7 @@ On `409 sequence_gap` the error carries the sequence to resume from. The
 
 ---
 
-## Known limits in 0.3.0
+## Known limits
 
 Stated plainly, because a security product that hides its edges is selling
 confidence rather than evidence.

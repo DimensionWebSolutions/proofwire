@@ -5,6 +5,8 @@ release together at the same version.
 
 ## Unreleased
 
+## 0.4.0 — 2026-09-25
+
 ### Security
 
 - **`pw dash` refuses requests whose `Host` is not its own**, which closes DNS

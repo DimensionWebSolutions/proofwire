@@ -17,6 +17,12 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    ignore:
+      # Node majors are chosen, not followed: odd ones (25, 27) are never
+      # long-term support, and moving to a new LTS line is a deliberate upgrade
+      # with its own testing. Patches and minors within the line still arrive.
+      - dependency-name: node
+        update-types: ['version-update:semver-major']
   - package-ecosystem: docker-compose
     directory: /deploy
     schedule:

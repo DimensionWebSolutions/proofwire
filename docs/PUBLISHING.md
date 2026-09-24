@@ -37,16 +37,28 @@ somewhere you control.
 
 ## Path 1 — from your machine
 
-How 0.2.0 and 0.3.0 were released. Before any release, bump every package
-and the internal `@proof_wire/*` pins together, and add the version's section
-to `CHANGELOG.md` — it becomes the GitHub release notes.
+How 0.2.0, 0.3.0 and 0.4.0 were released. First, **bump**: write what the
+release changes under `## Unreleased` in `CHANGELOG.md`, then
+
+```bash
+npm run bump -- 0.4.1           # every package, every internal pin, the Python
+                                # SDK, the lockfile, and the CHANGELOG heading
+git commit -am "Release 0.4.1" && git push
+```
+
+Then publish and tag:
 
 ```bash
 npm login                       # opens a browser
-node scripts/release.js --dry-run
+npm run release:dry             # the preflight, publishing nothing
 npm run release                 # asks for a 2FA code per package
-git tag -a v0.3.0 -m "Proofwire 0.3.0" && git push origin v0.3.0
+git tag -a v0.4.1 -m "Proofwire 0.4.1" && git push origin v0.4.1
 ```
+
+The preflight refuses to publish a version that is already on npm, a
+package pinning another at an older version, a version with no CHANGELOG
+section, or a Python SDK at a different number. Forgetting to bump used to
+look like a successful release that skipped every package.
 
 Tag *after* publishing. The tag push runs `.github/workflows/release.yml`,
 which, with no `NPM_TOKEN` secret, re-runs the suite on three operating
@@ -108,9 +120,14 @@ credential sits on a laptop.
 ### Releasing
 
 ```bash
-npm version 0.2.1 --workspaces --include-workspace-root
+npm run bump -- 0.4.1
+git commit -am "Release 0.4.1"
+git tag -a v0.4.1 -m "Proofwire 0.4.1"
 git push && git push --tags
 ```
+
+(Not `npm version --workspaces`: it leaves the internal `@proof_wire/*` pins at
+the old version, so the new CLI would install the old core.)
 
 The tag triggers `.github/workflows/release.yml`, which re-runs the full suite
 on three operating systems, checks the tag matches the manifests, publishes
