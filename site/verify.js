@@ -215,6 +215,57 @@ async function verifyInclusion({ leaf, index, treeSize, proof, root }) {
   return sn === 0 && same(acc, root);
 }
 
+/**
+ * Check that `secondRoot` extends `firstRoot` (RFC 6962 §2.1.2). The same
+ * walk as @proof_wire/core's verifyConsistency, asynchronously.
+ *
+ * @param {{ firstSize: number, secondSize: number, firstRoot: Uint8Array,
+ *   secondRoot: Uint8Array, proof: Uint8Array[] }} a
+ */
+async function verifyConsistency({ firstSize, secondSize, firstRoot, secondRoot, proof }) {
+  if (!Number.isInteger(firstSize) || !Number.isInteger(secondSize)) return false;
+  if (firstSize < 0 || secondSize < firstSize) return false;
+  if (firstSize === secondSize) return proof.length === 0 && same(firstRoot, secondRoot);
+  if (firstSize === 0) return proof.length === 0;
+
+  let fn = firstSize - 1;
+  let sn = secondSize - 1;
+  while ((fn & 1) === 1) {
+    fn >>>= 1;
+    sn >>>= 1;
+  }
+  if (proof.length === 0) return false;
+  let i = 0;
+  let fr;
+  let sr;
+  if (fn !== 0) {
+    fr = proof[i];
+    sr = proof[i];
+    i++;
+  } else {
+    fr = firstRoot;
+    sr = firstRoot;
+  }
+  for (; i < proof.length; i++) {
+    const p = proof[i];
+    if (sn === 0) return false;
+    if (p.length !== 32) return false;
+    if ((fn & 1) === 1 || fn === sn) {
+      fr = await nodeHash(p, fr);
+      sr = await nodeHash(p, sr);
+      while (fn !== 0 && (fn & 1) === 0) {
+        fn >>>= 1;
+        sn >>>= 1;
+      }
+    } else {
+      sr = await nodeHash(sr, p);
+    }
+    fn >>>= 1;
+    sn >>>= 1;
+  }
+  return sn === 0 && same(fr, firstRoot) && same(sr, secondRoot);
+}
+
 // ── Ed25519 ─────────────────────────────────────────────────────────────
 
 /** @type {Map<string, Promise<CryptoKey>>} */
@@ -376,12 +427,17 @@ async function verifyCheckpoint(checkpoint, keyring, { minWitnesses = 0, trusted
 
   const digest = await sha256(Uint8Array.of(CHECKPOINT), bytesOf(checkpoint.body));
   let hasLogSig = false;
+  // Each witness counts once, however often its signature is repeated.
+  const counted = new Set();
 
   for (const s of checkpoint.sigs) {
     if (pinned && s?.role === 'witness') {
       if (!has(trusted, s.kid)) continue; // a witness we were not told to trust
-      if (await verifySignature(trusted[s.kid], digest, s.sig)) witnesses++;
-      else issues.push(`invalid witness signature from ${s.kid}`);
+      if (counted.has(trusted[s.kid])) continue;
+      if (await verifySignature(trusted[s.kid], digest, s.sig)) {
+        counted.add(trusted[s.kid]);
+        witnesses++;
+      } else issues.push(`invalid witness signature from ${s.kid}`);
       continue;
     }
     if (pinned && s?.role === 'log' && has(trusted, s.kid)) {
@@ -397,7 +453,10 @@ async function verifyCheckpoint(checkpoint, keyring, { minWitnesses = 0, trusted
       issues.push(`invalid ${s.role} signature from ${s.kid}`);
       continue;
     }
-    if (s.role === 'witness') witnesses++; // unpinned: a claim, not evidence
+    if (s.role === 'witness' && !counted.has(keyring[s.kid])) {
+      counted.add(keyring[s.kid]);
+      witnesses++; // unpinned: a claim, not evidence
+    }
     if (s.role === 'log') hasLogSig = true;
   }
 
@@ -447,6 +506,13 @@ async function verifyBundleUnchecked(bundle, opts = {}) {
   }
 
   const minWitnesses = opts.minWitnesses ?? 0;
+  if (!Number.isInteger(minWitnesses) || minWitnesses < 0) {
+    return {
+      ok: false,
+      issues: [`minWitnesses must be a non-negative integer, got ${String(opts.minWitnesses)}`],
+      ...empty,
+    };
+  }
   const trusted =
     opts.trustedWitnesses && typeof opts.trustedWitnesses === 'object' ? opts.trustedWitnesses : undefined;
   if (minWitnesses > 0 && !trusted) {
@@ -457,6 +523,7 @@ async function verifyBundleUnchecked(bundle, opts = {}) {
   }
 
   const checkpoints = [];
+  const checkpointResults = [];
   for (const cp of bundle.checkpoints ?? []) {
     let res;
     try {
@@ -466,6 +533,7 @@ async function verifyBundleUnchecked(bundle, opts = {}) {
     }
     if (!res.ok) issues.push(`checkpoint at size ${cp?.body?.size}: ${res.issues.join('; ')}`);
     checkpoints.push({ size: cp?.body?.size, witnesses: res.witnesses, pinned: res.pinned, ok: res.ok });
+    checkpointResults.push({ cp, ok: res.ok });
   }
 
   let checked = 0;
@@ -512,6 +580,8 @@ async function verifyBundleUnchecked(bundle, opts = {}) {
     issues.push(`bundle head ${String(bundle.head).slice(0, 16)}… is not the hash of its final entry`);
   }
 
+  /** @type {Map<number, string> | null} */
+  let prefixRoots = null;
   if (!bundle.partial) {
     if (receipts.length !== treeSize) {
       issues.push(
@@ -520,8 +590,7 @@ async function verifyBundleUnchecked(bundle, opts = {}) {
     } else {
       const wanted = new Set((bundle.checkpoints ?? []).map((cp) => cp?.body?.size).filter(Number.isInteger));
       const tree = new Accumulator();
-      /** @type {Map<number, string>} */
-      const prefixRoots = new Map();
+      prefixRoots = new Map();
       // A checkpoint of the empty log names the empty root; without this it
       // was compared against nothing and reported as a rewritten history.
       if (wanted.has(0)) prefixRoots.set(0, hex(await tree.root()));
@@ -552,6 +621,19 @@ async function verifyBundleUnchecked(bundle, opts = {}) {
         }
       }
     }
+  }
+
+  // Which checkpoints vouch for *these* entries: a checkpoint's witnesses say
+  // nothing about this bundle unless its root is tied to the bundle's tree.
+  // See anchorCheckpoints in @proof_wire/core.
+  const witnessedSize = await anchorCheckpoints({
+    bundle, root, treeSize, prefixRoots, checkpointResults, issues,
+  });
+  if (trusted && minWitnesses > 0 && witnessedSize === null) {
+    issues.push(
+      `no checkpoint carrying ${minWitnesses} trusted witness signature(s) covers this ` +
+        `bundle's entries — nothing independent vouches for this history`,
+    );
   }
 
   // A complete bundle must also form an unbroken chain. A filtered one cannot,
@@ -600,8 +682,60 @@ async function verifyBundleUnchecked(bundle, opts = {}) {
       outcomes,
       checkpoints,
       receipts,
+      witnessedSize: trusted && minWitnesses > 0 ? (witnessedSize ?? 0) : null,
     },
   };
+}
+
+/**
+ * Tie each valid checkpoint to the bundle's tree, report any that contradict
+ * it, and return the largest size covered by one that passed (null if none).
+ */
+async function anchorCheckpoints({ bundle, root, treeSize, prefixRoots, checkpointResults, issues }) {
+  if (!Number.isInteger(treeSize)) return null;
+  const proofs = bundle.consistency && typeof bundle.consistency === 'object' ? bundle.consistency : {};
+  let best = null;
+
+  for (const { cp, ok } of checkpointResults) {
+    const size = cp?.body?.size;
+    if (!Number.isInteger(size) || size < 0) continue;
+    let anchored = false;
+    try {
+      if (prefixRoots) {
+        anchored = size <= treeSize && prefixRoots.get(size) === cp.body.root;
+      } else if (size > treeSize) {
+        issues.push(`checkpoint at size ${size} covers more entries than this bundle holds`);
+      } else if (size === treeSize) {
+        anchored = cp.body.root === bundle.root;
+        if (!anchored) {
+          issues.push(
+            `checkpoint at size ${size} names root ${String(cp.body.root).slice(0, 16)}…, but ` +
+              `this bundle's root is ${String(bundle.root).slice(0, 16)}… — history was rewritten`,
+          );
+        }
+      } else if (size === 0) {
+        anchored = cp.body.root === hex(await sha256());
+      } else if (has(proofs, String(size))) {
+        const proof = proofs[String(size)];
+        if (!Array.isArray(proof)) throw new Error('consistency proof is not a list');
+        anchored = await verifyConsistency({
+          firstSize: size,
+          secondSize: treeSize,
+          firstRoot: unhex(cp.body.root),
+          secondRoot: root,
+          proof: proof.map(unhex),
+        });
+        if (!anchored) {
+          issues.push(`checkpoint at size ${size} is not consistent with this bundle's root — history was rewritten`);
+        }
+      }
+    } catch (err) {
+      issues.push(`checkpoint at size ${size}: malformed consistency evidence: ${err?.message ?? err}`);
+      anchored = false;
+    }
+    if (anchored && ok && (best === null || size > best)) best = size;
+  }
+  return best;
 }
 
 /**

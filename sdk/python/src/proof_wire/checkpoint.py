@@ -56,6 +56,9 @@ def verify_checkpoint(
         issues.append(f"unsupported checkpoint version {body.get('v')}")
     digest = checkpoint_digest(body)
     has_log_sig = False
+    # Each witness counts once, however often its signature is repeated;
+    # keyed by public key, so one key pinned under two names is one witness.
+    counted: set = set()
     for s in checkpoint["sigs"]:
         if not isinstance(s, dict):
             issues.append("malformed signature entry")
@@ -64,7 +67,10 @@ def verify_checkpoint(
         if pinned and role == "witness":
             if kid not in trusted_witnesses:
                 continue
+            if trusted_witnesses[kid] in counted:
+                continue
             if verify(trusted_witnesses[kid], digest, s.get("sig", "")):
+                counted.add(trusted_witnesses[kid])
                 signers.append(kid)
                 witnesses += 1
             else:
@@ -79,9 +85,12 @@ def verify_checkpoint(
         if not verify(keyring[kid], digest, s.get("sig", "")):
             issues.append(f"invalid {role} signature from {kid}")
             continue
-        signers.append(kid)
         if role == "witness":
-            witnesses += 1
+            if keyring[kid] in counted:
+                continue
+            counted.add(keyring[kid])
+            witnesses += 1  # unpinned: a claim, not evidence
+        signers.append(kid)
         if role == "log":
             has_log_sig = True
     if not has_log_sig:

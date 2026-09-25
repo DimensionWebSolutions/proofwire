@@ -99,7 +99,7 @@ edit is one more thing to get wrong in a container.
 | `PROOFWIRE_BACKUP_HOURS` | `6` | |
 | `PROOFWIRE_BACKUP_KEEP` | `14` | Snapshots retained before pruning. |
 | `PROOFWIRE_NOTIFY_URL` | unset | Webhook for invitation and reset links. |
-| `PROOFWIRE_PUBLIC_URL` | unset | Base URL for those links, and for SSO's redirect URI. Set it behind a proxy. |
+| `PROOFWIRE_PUBLIC_URL` | unset | Base URL for those links, and for SSO's redirect URI. Set it behind a proxy. Without it, password resets are only issued to requests addressed to this machine (`localhost`, `127.x`, `[::1]`): anyone can request a reset, so its link is never built from a `Host` header the requester chose. |
 | `PROOFWIRE_OIDC_ALLOW_PRIVATE` | `0` | `1` lets an SSO provider live on a private address. Only for a self-hosted hub whose provider is on its own network. |
 | `PROOFWIRE_RETENTION_SWEEP_MINUTES` | `60` | How often retention runs. `0` disables it. |
 

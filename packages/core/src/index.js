@@ -57,6 +57,6 @@ export {
   cosignWith,
   verifyCheckpoint,
 } from './checkpoint.js';
-export { ProofLog, verifyBundle } from './log.js';
+export { ProofLog, verifyBundle, consistencyFor } from './log.js';
 export { Policy, History, parseWindow, globMatch } from './policy.js';
 export { redact, hasSecrets, DEFAULT_DETECTORS } from './redact.js';

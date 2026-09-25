@@ -254,6 +254,27 @@ harmless for witnesses, and a pinned key is refused as a log signature, but the
 `log` role itself is still just a claim. Should the role be inside the signed
 digest (a format v2), or is pinning the right and sufficient answer?
 
+**Three more, in how witnesses were counted — all shared by all three
+verifiers, so again invisible to differential testing.** Found by code review,
+each confirmed with a concrete bundle, all fixed in core, the website and the
+Python SDK:
+
+- **One witness counted many times.** A pinned witness's signature repeated
+  three times in `sigs` met `--witnesses 3`. Each public key now counts once.
+- **No checkpoint, no requirement.** The witness minimum was applied per
+  checkpoint, so a bundle with `checkpoints: []` met any minimum. A minimum
+  now requires at least one checkpoint that meets it *and* is tied to this
+  bundle's tree.
+- **A witnessed checkpoint was not tied to the bundle it arrived in.** For a
+  filtered bundle, checkpoint roots were never compared with anything, so a
+  genuine witnessed checkpoint from one log vouched for forged entries from
+  another. A checkpoint now counts only when its root equals the rebuilt
+  prefix root (complete bundle), equals the bundle root at the same size, or
+  is linked to it by a consistency proof in the bundle's new `consistency`
+  field (`{ "<size>": [hex, …] }`, one proof from the latest witnessed
+  checkpoint). The result reports `witnessedSize`: entries at or past it are
+  signed by the log alone, and `pw check` says so.
+
 Also worth knowing: `site/test/verify.test.js` runs the two independent
 verifiers over honest, tampered and 650 randomly mutated bundles and requires
 the same verdict every time. That is how all three gaps surfaced, and it is

@@ -557,3 +557,46 @@ test('random mutations agree on the witness path too', async () => {
     await agree(bundle, opts, `pinned mutation ${i} at ${at.join('.')}`);
   }
 });
+
+test('both anchor witnesses to the bundle, and refuse repeated or unanchored ones', async () => {
+  const actor = { agent: 'a', runtime: 'r', session: 's', principal: 'p@acme.test' };
+  const make = (n, target) => {
+    const log = ProofLog.create(fs.mkdtempSync(path.join(os.tmpdir(), 'pw-site-anchor-')));
+    for (let i = 0; i < n; i++) {
+      log.append({ actor, action: { kind: 'tool_call', target, params: { i } }, decision: { outcome: 'allow' } });
+    }
+    return log;
+  };
+  const witness = generateIdentity().identity;
+  const trusted = { [witness.kid]: witness.publicKey };
+  const log = make(5, 'real');
+  const cp = log.checkpoint();
+  log.addSignature(5, cosign(cp, witness).sigs.find((s) => s.role === 'witness'));
+  for (let i = 0; i < 4; i++) {
+    log.append({ actor, action: { kind: 'tool_call', target: 'real', params: { i } }, decision: { outcome: 'allow' } });
+  }
+  const opts = { minWitnesses: 1, trustedWitnesses: trusted };
+
+  const partial = clone(log.bundle({ filter: (r) => r.seq % 2 === 0 }));
+  const { c, w } = await agree(partial, opts, 'honest partial');
+  assert.ok(c.ok && w.ok);
+  assert.equal(w.summary.witnessedSize, 5);
+
+  const unanchored = clone(partial);
+  unanchored.consistency = {};
+  assert.equal((await agree(unanchored, opts, 'unanchored')).w.ok, false);
+
+  const repeated = clone(log.bundle());
+  const sig = repeated.checkpoints[0].sigs.find((s) => s.role === 'witness');
+  repeated.checkpoints[0].sigs.push({ ...sig }, { ...sig });
+  assert.equal((await agree(repeated, { minWitnesses: 3, trustedWitnesses: trusted }, 'repeated')).w.ok, false);
+
+  assert.equal((await agree(clone(make(3, 'x').bundle()), opts, 'no checkpoints')).w.ok, false);
+
+  const forged = clone(make(4, 'forged').bundle({ filter: (r) => r.seq < 3 }));
+  forged.keyring = { ...forged.keyring, ...log.keyring };
+  forged.checkpoints = log.checkpoints();
+  assert.equal((await agree(forged, opts, 'spliced checkpoint')).w.ok, false);
+
+  assert.equal((await agree(clone(log.bundle()), { minWitnesses: NaN }, 'NaN minimum')).w.ok, false);
+});

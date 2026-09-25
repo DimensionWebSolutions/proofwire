@@ -149,11 +149,20 @@ export function verifyCheckpoint(checkpoint, keyring, opts = {}) {
 
   const digest = checkpointDigest(checkpoint.body);
   let hasLogSig = false;
+  // Each witness counts once, however many times its signature appears. A
+  // signature is just bytes: without this, one witness's signature copied
+  // three times satisfied a policy that asked for three witnesses. Keyed by
+  // public key rather than kid, so one key pinned under two names is still
+  // one witness.
+  /** @type {Set<string>} */
+  const counted = new Set();
 
   for (const s of checkpoint.sigs) {
     if (pinned && s?.role === 'witness') {
       if (!has(trusted, s.kid)) continue; // a witness we were not told to trust
+      if (counted.has(trusted[s.kid])) continue;
       if (verify(trusted[s.kid], digest, s.sig)) {
+        counted.add(trusted[s.kid]);
         signers.push(s.kid);
         witnesses++;
       } else {
@@ -174,8 +183,12 @@ export function verifyCheckpoint(checkpoint, keyring, opts = {}) {
       issues.push(`invalid ${s.role} signature from ${s.kid}`);
       continue;
     }
+    if (s.role === 'witness') {
+      if (counted.has(keyring[s.kid])) continue;
+      counted.add(keyring[s.kid]);
+      witnesses++; // unpinned: a claim, not evidence
+    }
     signers.push(s.kid);
-    if (s.role === 'witness') witnesses++; // unpinned: a claim, not evidence
     if (s.role === 'log') hasLogSig = true;
   }
 

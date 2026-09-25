@@ -121,6 +121,59 @@ def test_witnesses_count_only_when_pinned(log):
     assert not verify_bundle(b, min_witnesses=1, trusted_witnesses={impostor.kid: impostor.public_key})["ok"]
 
 
+def witnessed(log, n_before, n_after):
+    """A log of n_before entries, checkpointed and witnessed, then n_after more."""
+    fill(log, n_before)
+    cp = log.checkpoint()
+    witness, _ = generate_identity()
+    log.add_signature(cp["body"]["size"], next(s for s in cosign(cp, witness)["sigs"] if s["role"] == "witness"))
+    fill(log, n_after, start=n_before)
+    return witness, {witness.kid: witness.public_key}
+
+
+def test_one_witness_repeated_counts_once(log):
+    _, trusted = witnessed(log, 4, 0)
+    b = json.loads(json.dumps(log.bundle()))
+    sig = next(s for s in b["checkpoints"][0]["sigs"] if s["role"] == "witness")
+    b["checkpoints"][0]["sigs"] += [dict(sig), dict(sig)]
+    assert verify_bundle(b, min_witnesses=1, trusted_witnesses=trusted)["ok"]
+    assert not verify_bundle(b, min_witnesses=3, trusted_witnesses=trusted)["ok"]
+
+
+def test_a_witness_requirement_fails_when_no_checkpoint_carries_it(log):
+    fill(log, 3)
+    witness, _ = generate_identity()
+    res = verify_bundle(log.bundle(), min_witnesses=1, trusted_witnesses={witness.kid: witness.public_key})
+    assert not res["ok"] and res["witnessedSize"] == 0
+
+
+def test_a_filtered_bundle_ties_an_older_witnessed_checkpoint_to_its_root(log):
+    _, trusted = witnessed(log, 5, 4)
+    b = json.loads(json.dumps(log.bundle(filter=lambda r: r["seq"] % 2 == 0)))
+    res = verify_bundle(b, min_witnesses=1, trusted_witnesses=trusted)
+    assert res["ok"], res["issues"]
+    assert res["witnessedSize"] == 5
+    assert verify_bundle(log.bundle(), min_witnesses=1, trusted_witnesses=trusted)["witnessedSize"] == 5
+
+    b["consistency"] = {}
+    assert not verify_bundle(b, min_witnesses=1, trusted_witnesses=trusted)["ok"], "unanchored witnesses vouch for nothing"
+
+
+def test_a_real_witnessed_checkpoint_does_not_vouch_for_forged_entries(log, tmp_path):
+    _, trusted = witnessed(log, 4, 0)
+    forged = ProofLog.create(tmp_path / "forged")
+    fill(forged, 4)
+    b = json.loads(json.dumps(forged.bundle(filter=lambda r: r["seq"] < 3)))
+    b["keyring"] = {**b["keyring"], **log.keyring}
+    b["checkpoints"] = log.checkpoints()
+    assert not verify_bundle(b, min_witnesses=1, trusted_witnesses=trusted)["ok"]
+
+
+def test_a_non_integer_witness_minimum_is_refused(log):
+    fill(log, 2)
+    assert not verify_bundle(log.bundle(), min_witnesses=-1)["ok"]
+
+
 def test_shredding_makes_payloads_unprovable_and_the_log_still_verifies(log):
     fill(log, 3)
     assert log.shred(lambda r: r["seq"] == 1) == 1

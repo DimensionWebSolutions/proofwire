@@ -718,6 +718,18 @@ test('administrative actions are recorded in a hash chain that verifies', async 
   assert.ok(res.events.some((e) => e.action === 'policy.publish'));
 });
 
+test('the event page size is clamped, never unbounded', async () => {
+  const total = hub.db.prepare('SELECT COUNT(*) AS n FROM audit_events WHERE org_id = ?').get(acme.org).n;
+  assert.ok(total > 1, 'the fixture should hold several events');
+  const count = async (limit) =>
+    (await api('GET', `/v1/events?limit=${limit}`, { token: acme.key })).json.events.length;
+  // SQLite reads a negative LIMIT as "no limit"; it has to mean one instead.
+  assert.equal(await count(-1), 1);
+  assert.equal(await count(0), 1);
+  assert.equal(await count('abc'), Math.min(total, 100));
+  assert.equal(await count(1e9), Math.min(total, 500));
+});
+
 test('editing the control-plane trail is detected', async () => {
   const row = hub.db
     .prepare('SELECT * FROM audit_events WHERE org_id = ? ORDER BY seq ASC LIMIT 1')

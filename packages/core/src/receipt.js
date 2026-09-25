@@ -312,8 +312,8 @@ export function verifyReceipt(receipt, keyring) {
     issues.push({ seq, kind: 'format', message: 'missing or malformed attestation' });
     return issues;
   }
-  const pub = keyring[attest.kid];
-  if (!pub) {
+  const pub = Object.prototype.hasOwnProperty.call(keyring ?? {}, attest.kid) ? keyring[attest.kid] : undefined;
+  if (typeof pub !== 'string') {
     issues.push({ seq, kind: 'key', message: `no public key for kid ${attest.kid}` });
     return issues;
   }
