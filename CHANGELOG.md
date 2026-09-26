@@ -5,6 +5,45 @@ release together at the same version.
 
 ## Unreleased
 
+### Security
+
+- **Witness requirements could be met without the witnesses.** Three gaps,
+  identical in `pw check`/`verifyBundle`, the website's verifier and the
+  Python SDK:
+  - one pinned witness's signature, repeated, counted as several witnesses;
+    each public key now counts once;
+  - a bundle with no checkpoints met any `--witnesses` minimum; now at least
+    one checkpoint has to meet it;
+  - in a filtered bundle a checkpoint's root was never tied to the bundle's,
+    so a genuine witnessed checkpoint of one log vouched for forged entries
+    of another. A checkpoint now counts only when its root is tied to the
+    bundle's tree.
+- **A password-reset link could point at another host.** Without
+  `PROOFWIRE_PUBLIC_URL` the hub built reset links from the request's `Host`
+  header, which whoever requests the reset chooses. It now issues resets
+  only when that URL is set or the request is addressed to this machine, and
+  answers identically either way.
+- **`pw check --witnesses abc` silently required no witnesses.** A NaN minimum
+  compared false against every count. The CLI now refuses anything but a whole
+  number, and `verifyBundle` fails a minimum that is not a non-negative integer.
+
+### Added
+
+- **Bundles carry a consistency proof** (`consistency: { "<size>": [...] }`)
+  from the latest witnessed checkpoint to their root, so a filtered bundle —
+  which every hub bundle becomes once retention prunes anything — can still
+  tie its witnesses to its entries. Older verifiers ignore the field.
+- **`verifyBundle` reports `witnessedSize`** when witnesses are required: the
+  entries a witnessed checkpoint covers. `pw check` and the website say when
+  later entries are signed by the log alone.
+
+### Fixed
+
+- `GET /v1/events?limit=` is clamped to 1–500; a negative limit meant "no
+  limit" to SQLite.
+- `verifyReceipt` looks up a signer only among the keyring's own properties,
+  as `verifyCheckpoint` already did.
+
 ## 0.4.0 — 2026-09-25
 
 ### Security

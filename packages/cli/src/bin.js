@@ -438,11 +438,18 @@ function cmdCheck(args) {
     bad('which bundle? `pw check <file.bundle.json>`');
     return 2;
   }
+  // Strict: `Number('abc')` is NaN, and a NaN minimum used to compare false
+  // against every count, silently turning the witness requirement off.
+  const minWitnesses = args.witnesses === undefined ? 0 : Number(args.witnesses);
+  if (!Number.isInteger(minWitnesses) || minWitnesses < 0) {
+    bad(`--witnesses must be a whole number, got ${JSON.stringify(args.witnesses)}`);
+    return 2;
+  }
   const bundle = JSON.parse(fs.readFileSync(file, 'utf8'));
   const trustedWitnesses = witnessKeysFrom(args);
   const res = verifyBundle(bundle, {
     expectRoot: args.root,
-    minWitnesses: Number(args.witnesses ?? 0),
+    minWitnesses,
     trustedWitnesses,
   });
 
@@ -460,6 +467,12 @@ function cmdCheck(args) {
     const claimsWitnesses = (bundle.checkpoints ?? []).some((cp) =>
       (cp.sigs ?? []).some((s) => s.role === 'witness'),
     );
+    if (res.witnessedSize !== undefined && res.witnessedSize < bundle.treeSize) {
+      out('');
+      const covered = res.witnessedSize === 0 ? 'none' : `entries 0–${res.witnessedSize - 1}`;
+      warn(`Witnesses vouch for ${covered} of ${bundle.treeSize}. Entries from ${res.witnessedSize} on are`);
+      warn('signed by the log alone; a newer witnessed checkpoint would cover them.');
+    }
     if (claimsWitnesses && !trustedWitnesses) {
       out('');
       warn('This bundle carries witness signatures, but none were checked against keys you chose.');

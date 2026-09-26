@@ -1218,11 +1218,9 @@ export class Hub {
       const email = String(ctx.body?.email ?? '');
       const user = email ? this.auth.userByEmail(email) : null;
 
-      if (user) {
-        const issued = this.tokens.issue({ kind: 'reset', userId: user.id });
-        const link = `${this._publicUrl(ctx)}/reset?token=${encodeURIComponent(issued.token)}`;
-        this._deliver({ kind: 'reset', email: user.email, link, expiresAt: issued.expiresAt });
-
+      // Same answer whether or not a link was issued: a refusal for want of a
+      // public URL must not become a way to tell which addresses exist.
+      if (user && this._issueReset(ctx, user)) {
         const orgs = this.auth.orgsFor(user.id);
         for (const org of orgs) {
           this.store.recordEvent({
@@ -1293,7 +1291,7 @@ export class Hub {
     r.get('/v1/events', (ctx) => {
       requireScope(ctx.principal, 'admin');
       return {
-        events: this.store.events(ctx.principal.orgId, Number(ctx.query.get('limit') ?? 100)),
+        events: this.store.events(ctx.principal.orgId, clampLimit(ctx.query.get('limit'), 100, 500)),
         integrity: this.store.auditEvents(ctx.principal.orgId),
       };
     });
@@ -1503,11 +1501,7 @@ export class Hub {
     r.post('/forgot', (ctx) => {
       const email = String(ctx.body?.email ?? '');
       const user = email ? this.auth.userByEmail(email) : null;
-      if (user) {
-        const issued = this.tokens.issue({ kind: 'reset', userId: user.id });
-        const link = `${this._publicUrl(ctx)}/reset?token=${encodeURIComponent(issued.token)}`;
-        this._deliver({ kind: 'reset', email: user.email, link, expiresAt: issued.expiresAt });
-      }
+      if (user) this._issueReset(ctx, user);
       // Same page either way: the response must not reveal whether the
       // address is registered.
       return { __redirect: '/forgot?sent=1' };
@@ -1862,6 +1856,48 @@ export class Hub {
   }
 
   /**
+   * The base for a password-reset link, or null when there is no trustworthy one.
+   *
+   * Anyone can ask for a reset, and without a configured public URL the base
+   * comes from the request's `Host` header, which the requester chooses. A
+   * request naming the victim's address and the attacker's host would mail
+   * the victim a genuine reset token pointing at the attacker's server. So
+   * outside of this machine, a reset link is only ever built from
+   * `PROOFWIRE_PUBLIC_URL`.
+   *
+   * @param {{ req: import('node:http').IncomingMessage }} ctx
+   * @returns {string | null}
+   */
+  _resetLinkBase(ctx) {
+    if (this.config.publicUrl) return trimSlashes(this.config.publicUrl);
+    if (isLoopbackHost(ctx.req.headers.host)) return this._publicUrl(ctx);
+    console.error(
+      JSON.stringify({
+        level: 'warn',
+        event: 'reset.no_public_url',
+        message: 'password reset refused: set PROOFWIRE_PUBLIC_URL so reset links cannot be pointed at another host',
+      }),
+    );
+    return null;
+  }
+
+  /**
+   * Issue and deliver a password reset for `user`, if a safe link can be built.
+   *
+   * @param {{ req: import('node:http').IncomingMessage }} ctx
+   * @param {{ id: string, email: string }} user
+   * @returns {boolean}
+   */
+  _issueReset(ctx, user) {
+    const base = this._resetLinkBase(ctx);
+    if (!base) return false;
+    const issued = this.tokens.issue({ kind: 'reset', userId: user.id });
+    const link = `${base}/reset?token=${encodeURIComponent(issued.token)}`;
+    this._deliver({ kind: 'reset', email: user.email, link, expiresAt: issued.expiresAt });
+    return true;
+  }
+
+  /**
    * Hand a link to whatever actually sends mail.
    *
    * Deliberately a webhook rather than built-in SMTP: every organisation
@@ -2156,6 +2192,35 @@ function verifyPasswordSafe(password, hash) {
  * @type {string | undefined}
  */
 let dummyPasswordHash;
+
+/**
+ * A page size from a query string: a default when absent or not a number,
+ * otherwise clamped to [1, max]. SQLite reads a negative LIMIT as "no limit".
+ *
+ * @param {string | null} raw
+ * @param {number} fallback
+ * @param {number} max
+ */
+function clampLimit(raw, fallback, max) {
+  const n = raw === null ? fallback : Math.trunc(Number(raw));
+  return Number.isFinite(n) ? Math.min(Math.max(n, 1), max) : fallback;
+}
+
+/**
+ * Whether a `Host` header names this machine.
+ *
+ * @param {string | undefined} host
+ */
+function isLoopbackHost(host) {
+  if (typeof host !== 'string') return false;
+  let name;
+  try {
+    name = new URL(`http://${host}`).hostname;
+  } catch {
+    return false;
+  }
+  return name === 'localhost' || name === '[::1]' || /^127\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(name);
+}
 
 /**
  * @param {string} name

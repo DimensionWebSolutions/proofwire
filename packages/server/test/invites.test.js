@@ -284,6 +284,56 @@ test('requesting a reset never reveals whether an account exists', async () => {
   assert.equal(hub.auth.userByEmail('nobody@nowhere.test'), null);
 });
 
+test('a reset link is never built from a Host header the requester chose', async () => {
+  // Anyone can ask for a reset. Were the link built from Host, naming the
+  // victim's address and the attacker's host would mail the victim a genuine
+  // token pointing at the attacker's server.
+  const { request } = await import('node:http');
+  /** @param {string} host */
+  const resetWithHost = (host) =>
+    new Promise((resolve, reject) => {
+      const req = request(
+        base + '/v1/auth/reset',
+        { method: 'POST', headers: { host, 'content-type': 'application/json' } },
+        (res) => {
+          let body = '';
+          res.on('data', (d) => { body += d; });
+          res.on('end', () => resolve({ status: res.statusCode, json: JSON.parse(body) }));
+        },
+      );
+      req.on('error', reject);
+      req.end(JSON.stringify({ email: 'reset@acme.test' }));
+    });
+
+  /** @type {any[]} */
+  const sent = [];
+  const deliver = hub._deliver;
+  hub._deliver = (payload) => { sent.push(payload); };
+  const quiet = console.error;
+  console.error = () => {};
+  try {
+    const refused = await resetWithHost('attacker.example');
+    assert.equal(refused.status, 200);
+    assert.deepEqual(refused.json, (await api('POST', '/v1/auth/reset', { body: { email: 'nobody@nowhere.test' } })).json,
+      'a refusal must look like every other answer');
+    assert.equal(sent.length, 0, 'no link may be issued for a foreign host');
+
+    await resetWithHost('localhost:1234');
+    assert.equal(sent.length, 1, 'this machine is still served, so a local hub keeps working');
+    // The scheme follows PROOFWIRE_INSECURE_COOKIES, which CI sets; the host is the point.
+    assert.equal(new URL(sent[0].link).host, 'localhost:1234', sent[0].link);
+
+    hub.config.publicUrl = 'https://hub.acme.test/';
+    await resetWithHost('attacker.example');
+    assert.equal(sent.length, 2);
+    assert.ok(sent[1].link.startsWith('https://hub.acme.test/reset?'), 'the configured URL wins over Host');
+  } finally {
+    hub._deliver = deliver;
+    console.error = quiet;
+    delete hub.config.publicUrl;
+  }
+});
+
 test('a short password is refused before anything is changed', async () => {
   const user = hub.auth.userByEmail('reset@acme.test');
   const issued = hub.tokens.issue({ kind: 'reset', userId: user.id });

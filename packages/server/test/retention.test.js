@@ -14,6 +14,7 @@ import {
   verifyBundle,
   verifyInclusion,
   unhex,
+  cosignWith,
 } from '@proof_wire/core';
 import { Hub } from '../src/app.js';
 import { Auth } from '../src/auth.js';
@@ -242,4 +243,28 @@ test('proofwire-hub retention shows and sets it from the host', () => {
   assert.equal(set.code, 0, set.out);
   assert.match(set.out, /applied\s+365 days/);
   assert.match(run(['retention', 'globex', '--days', 'forever', '--cap', 'none']).out, /applied\s+forever/);
+});
+
+test('a pruned bundle ties an older witnessed checkpoint to its root, so pinned witnesses still count', async () => {
+  // Retention makes every hub bundle partial, and a partial bundle cannot
+  // rebuild its tree. With the log grown past its witnessed checkpoint, only
+  // the consistency proof the hub ships can tie the witness to this bundle.
+  const log = hub.store.logBySlug(t.org, 'payments');
+  const [latest] = hub.store.checkpoints(t.org, log.id, 1);
+  const signed = await cosignWith(latest, hub.witnessSigner);
+  hub.store.addWitnessSignature(t.org, log.id, latest.body.size, signed.sigs.find((x) => x.role === 'witness'));
+  const more = [agent.make(new Date().toISOString()), agent.make(new Date(Date.now() + 1000).toISOString())];
+  assert.equal((await api('POST', '/v1/logs/payments/receipts', t.agent, { receipts: more })).status, 200);
+
+  const bundle = (await api('GET', '/v1/logs/payments/bundle', t.agent)).json;
+  assert.equal(bundle.partial, true);
+  assert.ok(bundle.treeSize > latest.body.size, 'the log has grown past its witnessed checkpoint');
+  assert.ok(Array.isArray(bundle.consistency[String(latest.body.size)]), 'the hub should ship a consistency proof');
+  const trusted = { [hub.witnessSigner.kid]: hub.witnessSigner.publicKey };
+  const v = verifyBundle(bundle, { minWitnesses: 1, trustedWitnesses: trusted });
+  assert.ok(v.ok, JSON.stringify(v.issues));
+  assert.equal(v.witnessedSize, latest.body.size);
+
+  delete bundle.consistency;
+  assert.equal(verifyBundle(bundle, { minWitnesses: 1, trustedWitnesses: trusted }).ok, false);
 });

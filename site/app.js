@@ -202,6 +202,14 @@ function render(res, bundle, opts) {
           (opts.minWitnesses ? `, and you require at least ${opts.minWitnesses} on every checkpoint.` : '. Set a minimum below to make that a requirement.'),
       });
     }
+    if (res.ok && Number.isInteger(s.witnessedSize) && s.witnessedSize < s.treeSize) {
+      notes.push({
+        title: 'Not every entry is witnessed yet',
+        body:
+          `Your witnesses vouch for ${s.witnessedSize === 0 ? 'none' : `entries 0–${s.witnessedSize - 1}`} of ${s.treeSize}. ` +
+          `Entries from ${s.witnessedSize} on are signed by the log alone, until a newer checkpoint is witnessed.`,
+      });
+    }
   }
   if (!opts.expectRoot && res.ok) {
     notes.push({

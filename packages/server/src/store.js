@@ -15,6 +15,7 @@ import {
   signCheckpointWith,
   identityFromPem,
   generateIdentity,
+  consistencyFor,
 } from '@proof_wire/core';
 import { newId, now, today, transact } from './db.js';
 
@@ -930,6 +931,9 @@ export class Store {
       head: log.head,
       keyring,
       checkpoints,
+      // Retention makes most hub bundles partial, and a partial bundle can
+      // only tie its witnesses to its root through one of these.
+      consistency: consistencyFor(tree, checkpoints),
       partial: rows.length !== log.size,
       entries: rows.map((r) => ({
         receipt: JSON.parse(r.body),

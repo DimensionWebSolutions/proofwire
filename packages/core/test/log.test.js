@@ -607,3 +607,91 @@ test('pinning nothing at all is not the same as not pinning', () => {
   assert.equal(res.ok, false);
   assert.ok(res.issues.some((m) => /only 0 valid witness signature/.test(m)));
 });
+
+// ── witnesses have to vouch for *this* bundle ─────────────────────────────
+
+/**
+ * A log of `before` entries, checkpointed and witnessed, then `after` more.
+ *
+ * @param {number} before
+ * @param {number} after
+ */
+function witnessedAt(before, after) {
+  const log = ProofLog.create(tmpdir());
+  fill(log, before);
+  const cp = log.checkpoint();
+  const witness = generateIdentity().identity;
+  log.addSignature(before, cosign(cp, witness).sigs.find((s) => s.role === 'witness'));
+  fill(log, after);
+  return { log, trusted: { [witness.kid]: witness.publicKey } };
+}
+
+test('one witness signature repeated counts as one witness', () => {
+  const { log, trusted } = witnessedAt(4, 0);
+  const bundle = JSON.parse(JSON.stringify(log.bundle()));
+  const sig = bundle.checkpoints[0].sigs.find((s) => s.role === 'witness');
+  bundle.checkpoints[0].sigs.push({ ...sig }, { ...sig });
+
+  assert.ok(verifyBundle(bundle, { minWitnesses: 1, trustedWitnesses: trusted }).ok);
+  const res = verifyBundle(bundle, { minWitnesses: 3, trustedWitnesses: trusted });
+  assert.equal(res.ok, false);
+  assert.ok(res.issues.some((m) => /only 1 valid witness/.test(m)), res.issues.join('\n'));
+});
+
+test('a witness requirement fails when no checkpoint carries it', () => {
+  const log = ProofLog.create(tmpdir());
+  fill(log, 3);
+  const witness = generateIdentity().identity;
+  const res = verifyBundle(log.bundle(), {
+    minWitnesses: 1,
+    trustedWitnesses: { [witness.kid]: witness.publicKey },
+  });
+  assert.equal(res.ok, false);
+  assert.equal(res.witnessedSize, 0);
+});
+
+test('a filtered bundle ties an older witnessed checkpoint to its root', () => {
+  const { log, trusted } = witnessedAt(5, 4);
+  const opts = { minWitnesses: 1, trustedWitnesses: trusted };
+
+  const full = verifyBundle(log.bundle(), opts);
+  assert.ok(full.ok, full.issues.join('\n'));
+  assert.equal(full.witnessedSize, 5, 'the last four entries are signed by the log alone');
+
+  const bundle = JSON.parse(JSON.stringify(log.bundle({ filter: (r) => r.seq % 2 === 0 })));
+  const res = verifyBundle(bundle, opts);
+  assert.ok(res.ok, res.issues.join('\n'));
+  assert.equal(res.witnessedSize, 5);
+
+  bundle.consistency = {};
+  assert.equal(verifyBundle(bundle, opts).ok, false, 'an unanchored checkpoint vouches for nothing');
+});
+
+test('a tampered consistency proof is reported as a rewrite', () => {
+  const { log, trusted } = witnessedAt(5, 4);
+  const bundle = JSON.parse(JSON.stringify(log.bundle({ filter: (r) => r.seq % 2 === 0 })));
+  const proof = bundle.consistency['5'];
+  proof[0] = proof[0].replace(/^./, (ch) => (ch === '0' ? '1' : '0'));
+  const res = verifyBundle(bundle, { minWitnesses: 1, trustedWitnesses: trusted });
+  assert.equal(res.ok, false);
+  assert.ok(res.issues.some((m) => /not consistent with this bundle's root/.test(m)), res.issues.join('\n'));
+});
+
+test('a genuine witnessed checkpoint does not vouch for forged entries', () => {
+  const { log: real, trusted } = witnessedAt(4, 0);
+  const forged = ProofLog.create(tmpdir());
+  fill(forged, 4);
+  const bundle = JSON.parse(JSON.stringify(forged.bundle({ filter: (r) => r.seq < 3 })));
+  bundle.keyring = { ...bundle.keyring, ...real.keyring };
+  bundle.checkpoints = real.checkpoints();
+
+  assert.equal(verifyBundle(bundle, { minWitnesses: 1, trustedWitnesses: trusted }).ok, false);
+});
+
+test('a witness minimum that is not a non-negative integer is refused, not ignored', () => {
+  const log = ProofLog.create(tmpdir());
+  fill(log, 2);
+  for (const minWitnesses of [NaN, -1, 1.5, '1']) {
+    assert.equal(verifyBundle(log.bundle(), { minWitnesses }).ok, false, String(minWitnesses));
+  }
+});

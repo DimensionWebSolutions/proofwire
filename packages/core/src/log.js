@@ -436,6 +436,7 @@ export class ProofLog {
   bundle(opts = {}) {
     const selected = opts.filter ? this.entries.filter(opts.filter) : this.entries;
     const entries = selected;
+    const checkpoints = this.checkpoints();
     return {
       v: 1,
       kind: 'proofwire.bundle',
@@ -445,7 +446,8 @@ export class ProofLog {
       root: this.root,
       head: this.head,
       keyring: this.keyring,
-      checkpoints: this.checkpoints(),
+      checkpoints,
+      consistency: consistencyFor(this.tree, checkpoints),
       partial: selected.length !== this.entries.length,
       // Inclusion proofs let a filtered bundle still tie each entry to the
       // full-log root, so exporting a subset proves no selective omission
@@ -456,6 +458,29 @@ export class ProofLog {
       })),
     };
   }
+}
+
+/**
+ * Consistency proofs from the latest witnessed checkpoint to the bundle's
+ * root, keyed by the checkpoint's size.
+ *
+ * A filtered bundle cannot rebuild the tree, so without this its entries could
+ * only be tied to a witnessed checkpoint taken at exactly the bundle's size.
+ * One proof is enough for a verifier to anchor the witnesses, and one keeps an
+ * export at a single O(n) pass however many checkpoints the log has taken.
+ *
+ * @param {MerkleTree} tree
+ * @param {import('./checkpoint.js').Checkpoint[]} checkpoints
+ * @returns {Record<string, string[]>}
+ */
+export function consistencyFor(tree, checkpoints) {
+  const witnessed = checkpoints
+    .filter((cp) => (cp.sigs ?? []).some((s) => s.role === 'witness'))
+    .map((cp) => cp.body.size)
+    .filter((size) => Number.isInteger(size) && size > 0 && size < tree.size);
+  if (witnessed.length === 0) return {};
+  const size = Math.max(...witnessed);
+  return { [size]: tree.consistencyProof(size).map(hex) };
 }
 
 /**
@@ -498,6 +523,15 @@ function verifyBundleUnchecked(bundle, opts = {}) {
   // witnesses: asking for N without saying whose keys to trust is refused
   // rather than answered by counting whatever the bundle happens to contain.
   const minWitnesses = opts.minWitnesses ?? 0;
+  if (!Number.isInteger(minWitnesses) || minWitnesses < 0) {
+    // A NaN here used to compare false against everything and so quietly
+    // switched the witness requirement off.
+    return {
+      ok: false,
+      issues: [`minWitnesses must be a non-negative integer, got ${String(opts.minWitnesses)}`],
+      checked: 0,
+    };
+  }
   const trustedWitnesses =
     opts.trustedWitnesses && typeof opts.trustedWitnesses === 'object'
       ? opts.trustedWitnesses
@@ -509,11 +543,14 @@ function verifyBundleUnchecked(bundle, opts = {}) {
     );
   }
 
+  /** @type {{ cp: any, ok: boolean }[]} */
+  const checkpointResults = [];
   for (const cp of bundle.checkpoints ?? []) {
     const res = verifyCheckpoint(cp, keyring, {
       minWitnesses: trustedWitnesses ? minWitnesses : 0,
       trustedWitnesses,
     });
+    checkpointResults.push({ cp, ok: res.ok });
     if (!res.ok) {
       issues.push(`checkpoint at size ${cp.body?.size}: ${res.issues.join('; ')}`);
     }
@@ -579,6 +616,8 @@ function verifyBundleUnchecked(bundle, opts = {}) {
     );
   }
 
+  /** @type {Map<number, string> | null} */
+  let prefixRoots = null;
   if (!bundle.partial) {
     if (receipts.length !== treeSize) {
       issues.push(
@@ -597,7 +636,7 @@ function verifyBundleUnchecked(bundle, opts = {}) {
       // A checkpoint of the empty log is legitimate and names the empty root.
       // Without this entry it was compared against nothing and reported as a
       // rewritten history: a false tampering alarm.
-      const prefixRoots = new Map(wanted.has(0) ? [[0, hex(new MerkleTree().root)]] : []);
+      prefixRoots = new Map(wanted.has(0) ? [[0, hex(new MerkleTree().root)]] : []);
       leaves.forEach((leaf, k) => {
         tree.append(leaf);
         if (wanted.has(k + 1)) prefixRoots.set(k + 1, hex(tree.root));
@@ -627,6 +666,25 @@ function verifyBundleUnchecked(bundle, opts = {}) {
     }
   }
 
+  // ── which checkpoints vouch for *these* entries ────────────────────────
+  //
+  // A checkpoint's signatures prove only that someone signed that body. For
+  // witnesses to say anything about this bundle, the checkpoint's root has to
+  // be tied to the bundle's own tree: rebuilt from the entries when the bundle
+  // is complete, equal to the bundle root at the same size, or linked to it by
+  // a consistency proof. Without this a filtered bundle of forged entries
+  // passed a witness check by carrying a genuine witnessed checkpoint of some
+  // other log, and a bundle with no checkpoints at all passed any minimum.
+  const witnessedSize = anchorCheckpoints({
+    bundle, root, treeSize, prefixRoots, checkpointResults, issues,
+  });
+  if (trustedWitnesses && minWitnesses > 0 && witnessedSize === null) {
+    issues.push(
+      `no checkpoint carrying ${minWitnesses} trusted witness signature(s) covers this ` +
+        `bundle's entries — nothing independent vouches for this history`,
+    );
+  }
+
   // A complete bundle must also form an unbroken chain. A filtered one cannot,
   // by construction, so inclusion proofs carry the weight there instead.
   try {
@@ -647,7 +705,79 @@ function verifyBundleUnchecked(bundle, opts = {}) {
     issues.push(`could not verify the receipts: ${/** @type {Error} */ (err).message}`);
   }
 
-  return { ok: issues.length === 0, issues, checked };
+  return {
+    ok: issues.length === 0,
+    issues,
+    checked,
+    // How many leading entries a checkpoint meeting the witness requirement
+    // covers. Entries at or past this are signed by the log alone.
+    ...(trustedWitnesses && minWitnesses > 0 ? { witnessedSize: witnessedSize ?? 0 } : {}),
+  };
+}
+
+/**
+ * Tie each valid checkpoint to the bundle's tree, reporting any that
+ * contradict it, and return the largest size covered by one that passed
+ * verification (null when none did).
+ *
+ * @param {object} a
+ * @param {any} a.bundle
+ * @param {Buffer} a.root
+ * @param {unknown} a.treeSize
+ * @param {Map<number, string> | null} a.prefixRoots  Set when the tree was rebuilt.
+ * @param {{ cp: any, ok: boolean }[]} a.checkpointResults
+ * @param {string[]} a.issues
+ * @returns {number | null}
+ */
+function anchorCheckpoints({ bundle, root, treeSize, prefixRoots, checkpointResults, issues }) {
+  if (!Number.isInteger(treeSize)) return null;
+  const n = /** @type {number} */ (treeSize);
+  const proofs = bundle.consistency && typeof bundle.consistency === 'object' ? bundle.consistency : {};
+  let best = null;
+
+  for (const { cp, ok } of checkpointResults) {
+    const size = cp?.body?.size;
+    if (!Number.isInteger(size) || size < 0) continue;
+    let anchored = false;
+    try {
+      if (prefixRoots) {
+        // Complete bundle: any disagreement was reported above.
+        anchored = size <= n && prefixRoots.get(size) === cp.body.root;
+      } else if (size > n) {
+        issues.push(`checkpoint at size ${size} covers more entries than this bundle holds`);
+      } else if (size === n) {
+        anchored = cp.body.root === bundle.root;
+        if (!anchored) {
+          issues.push(
+            `checkpoint at size ${size} names root ${String(cp.body.root).slice(0, 16)}…, but ` +
+              `this bundle's root is ${String(bundle.root).slice(0, 16)}… — history was rewritten`,
+          );
+        }
+      } else if (size === 0) {
+        anchored = cp.body.root === hex(new MerkleTree().root);
+      } else if (Object.prototype.hasOwnProperty.call(proofs, String(size))) {
+        const proof = proofs[String(size)];
+        if (!Array.isArray(proof)) throw new Error('consistency proof is not a list');
+        anchored = verifyConsistency({
+          firstSize: size,
+          secondSize: n,
+          firstRoot: unhex(cp.body.root),
+          secondRoot: root,
+          proof: proof.map(unhex),
+        });
+        if (!anchored) {
+          issues.push(
+            `checkpoint at size ${size} is not consistent with this bundle's root — history was rewritten`,
+          );
+        }
+      }
+    } catch (err) {
+      issues.push(`checkpoint at size ${size}: malformed consistency evidence: ${/** @type {Error} */ (err).message}`);
+      anchored = false;
+    }
+    if (anchored && ok && (best === null || size > best)) best = size;
+  }
+  return best;
 }
 
 /**
